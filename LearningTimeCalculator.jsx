@@ -1,0 +1,665 @@
+import React, { useState, useMemo, useRef } from 'react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
+
+// ============================================================
+// LOOKUP TABLES (sourced directly from the Excel workbook)
+// ============================================================
+
+const ILO_COMPLEXITY = {
+  'Low': 1,
+  'Medium': 3,
+  'High': 7,
+};
+
+const READING_TYPES = {
+  'Textbook (standard)': 400,
+  'Textbook (technical)': 500,
+  'Article/Handout': 250,
+};
+
+const READING_PURPOSES = {
+  'Comprehension': 300,
+  'Application': 200,
+  'Analysis': 200,
+  'Memorization': 138,
+  'Deep Engagement': 100,
+  'Skimming': 525,
+  'Average': 243.8333,
+};
+
+const WRITING_HOURS_PER_PAGE = {
+  'Reflection/Narrative|No Drafting': 0.75,
+  'Reflection/Narrative|Minimal Drafting': 1,
+  'Reflection/Narrative|Extensive Drafting': 1.25,
+  'Argument|No Drafting': 1.5,
+  'Argument|Minimal Drafting': 2,
+  'Argument|Extensive Drafting': 2.5,
+  'Research|No Drafting': 3,
+  'Research|Minimal Drafting': 4,
+  'Research|Extensive Drafting': 5,
+};
+
+const ASSIGNMENT_HOURS = {
+  'Blog Entry (public)': 0.5,
+  'Journal Entry (private)': 0.5,
+  'Case Study': 1,
+  'Problem Solving': 1,
+};
+
+const PROJECT_HOURS = {
+  'Group Project Deliverable': 1,
+  'Media Project: Podcast': 1,
+  'Media Project: Video': 1,
+  'Written Project': 1,
+  'Presentation': 1,
+};
+
+const WRITING_TYPES = ['Reflection/Narrative', 'Argument', 'Research'];
+const DRAFTING_LEVELS = ['No Drafting', 'Minimal Drafting', 'Extensive Drafting'];
+
+// Credit hour standard (Pitt): 1 credit = 45 hrs learning time, 3 credits = 135 hrs
+const HOURS_PER_CREDIT = 45;
+
+// ============================================================
+// EMPTY MODULE FACTORY
+// ============================================================
+
+const makeEmptyModule = () => ({
+  liveMeeting: 0,
+  // Learning content
+  reading1Type: 'Textbook (standard)',
+  reading1Purpose: 'Comprehension',
+  reading1Pages: 0,
+  reading2Type: 'Article/Handout',
+  reading2Purpose: 'Analysis',
+  reading2Pages: 0,
+  lectureVideoMin: 0,
+  lectureSlides: 0,
+  iloType: 'Interactive Video',
+  iloComplexity: 'Medium',
+  iloUnits: 0,
+  audiovisualMin: 0,
+  // Assignments
+  discussionInitial: 0,
+  discussionReply: 0,
+  assignment1Type: 'Journal Entry (private)',
+  assignment1Count: 0,
+  assignment2Type: 'Blog Entry (public)',
+  assignment2Count: 0,
+  quizQuestions: 0,
+  examQuestions: 0,
+  writingType: 'Argument',
+  writingDrafting: 'Extensive Drafting',
+  writingPages: 0,
+  projectType: 'Written Project',
+  projectCount: 0,
+  projectHoursEach: 1,
+  studyTime: 0,
+  adjustments: 0,
+});
+
+// ============================================================
+// CALCULATION LOGIC (mirrors the Excel formulas)
+// ============================================================
+
+const calcReadingHours = (type, purpose, pages) => {
+  const wpp = READING_TYPES[type] || 0;
+  const wpm = READING_PURPOSES[purpose] || 0;
+  if (!wpp || !wpm || !pages) return 0;
+  return (pages * wpp) / wpm / 60;
+};
+
+const calcModule = (m) => {
+  const reviewExpectations = 0.5; // baseline per module
+  const reading1 = calcReadingHours(m.reading1Type, m.reading1Purpose, +m.reading1Pages);
+  const reading2 = calcReadingHours(m.reading2Type, m.reading2Purpose, +m.reading2Pages);
+  const lectureVideo = (+m.lectureVideoMin * 2) / 60;
+  const lectureSlides = (+m.lectureSlides * 1.5) / 60;
+  const ilo = ((+m.iloUnits) * (ILO_COMPLEXITY[m.iloComplexity] || 0)) / 60;
+  const audiovisual = (+m.audiovisualMin * 2) / 60;
+
+  const learningContent =
+    reviewExpectations + reading1 + reading2 + lectureVideo + lectureSlides + ilo + audiovisual;
+
+  const discussionInitial = (+m.discussionInitial * 60) / 60; // 1 hr each
+  const discussionReply = (+m.discussionReply * 15) / 60; // 0.25 hr each
+  const assignment1 = (+m.assignment1Count) * (ASSIGNMENT_HOURS[m.assignment1Type] || 0);
+  const assignment2 = (+m.assignment2Count) * (ASSIGNMENT_HOURS[m.assignment2Type] || 0);
+  const quiz = (+m.quizQuestions * 1.5) / 60;
+  const exam = (+m.examQuestions * 1.5) / 60;
+  const writingKey = `${m.writingType}|${m.writingDrafting}`;
+  const writing = (+m.writingPages) * (WRITING_HOURS_PER_PAGE[writingKey] || 0);
+  const project = (+m.projectCount) * (PROJECT_HOURS[m.projectType] || 0) * (+m.projectHoursEach);
+  const studyTime = (+m.studyTime * 75) / 60; // 1.25x multiplier
+  const adjustments = +m.adjustments;
+
+  const assignments =
+    discussionInitial + discussionReply + assignment1 + assignment2 +
+    quiz + exam + writing + project + studyTime + adjustments;
+
+  const liveMeeting = +m.liveMeeting;
+  const moduleTotal = liveMeeting + learningContent + assignments;
+
+  return {
+    liveMeeting,
+    learningContent,
+    assignments,
+    moduleTotal,
+    breakdown: {
+      reviewExpectations, reading1, reading2, lectureVideo, lectureSlides, ilo, audiovisual,
+      discussionInitial, discussionReply, assignment1, assignment2,
+      quiz, exam, writing, project, studyTime, adjustments,
+    }
+  };
+};
+
+// ============================================================
+// UI HELPERS
+// ============================================================
+
+const fmt = (n) => (Math.round(n * 100) / 100).toFixed(2);
+
+const FieldRow = ({ label, children }) => (
+  <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: '8px', alignItems: 'center', marginBottom: '6px' }}>
+    <label style={{ fontSize: '13px', color: '#374151' }}>{label}</label>
+    <div>{children}</div>
+  </div>
+);
+
+const NumInput = ({ value, onChange, step = 1, min = 0 }) => (
+  <input
+    type="number"
+    value={value}
+    onChange={(e) => onChange(e.target.value)}
+    step={step}
+    min={min}
+    style={{ width: '100%', padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '13px' }}
+  />
+);
+
+const Select = ({ value, onChange, options }) => (
+  <select
+    value={value}
+    onChange={(e) => onChange(e.target.value)}
+    style={{ width: '100%', padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '13px', background: 'white' }}
+  >
+    {options.map(o => <option key={o} value={o}>{o}</option>)}
+  </select>
+);
+
+// ============================================================
+// MODULE EDITOR PANEL
+// ============================================================
+
+const ModuleEditor = ({ module, onChange, moduleIndex, results }) => {
+  const upd = (key) => (val) => onChange({ ...module, [key]: val });
+
+  const Section = ({ title, children }) => (
+    <div style={{ marginBottom: '16px' }}>
+      <div style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6b7280', marginBottom: '8px', borderBottom: '1px solid #e5e7eb', paddingBottom: '4px' }}>
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+
+  return (
+    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '16px' }}>
+        <h3 style={{ margin: 0, fontSize: '18px', color: '#111827' }}>Module {moduleIndex}</h3>
+        <div style={{ fontSize: '13px', color: '#6b7280' }}>
+          Total: <span style={{ fontWeight: 600, color: '#111827' }}>{fmt(results.moduleTotal)} hrs</span>
+        </div>
+      </div>
+
+      <Section title="Live Meeting">
+        <FieldRow label="Live meeting (hrs)">
+          <NumInput value={module.liveMeeting} onChange={upd('liveMeeting')} step={0.25} />
+        </FieldRow>
+      </Section>
+
+      <Section title="Learning Content">
+        <FieldRow label="Reading #1 type">
+          <Select value={module.reading1Type} onChange={upd('reading1Type')} options={Object.keys(READING_TYPES)} />
+        </FieldRow>
+        <FieldRow label="Reading #1 purpose">
+          <Select value={module.reading1Purpose} onChange={upd('reading1Purpose')} options={Object.keys(READING_PURPOSES)} />
+        </FieldRow>
+        <FieldRow label="Reading #1 pages">
+          <NumInput value={module.reading1Pages} onChange={upd('reading1Pages')} />
+        </FieldRow>
+
+        <FieldRow label="Reading #2 type">
+          <Select value={module.reading2Type} onChange={upd('reading2Type')} options={Object.keys(READING_TYPES)} />
+        </FieldRow>
+        <FieldRow label="Reading #2 purpose">
+          <Select value={module.reading2Purpose} onChange={upd('reading2Purpose')} options={Object.keys(READING_PURPOSES)} />
+        </FieldRow>
+        <FieldRow label="Reading #2 pages">
+          <NumInput value={module.reading2Pages} onChange={upd('reading2Pages')} />
+        </FieldRow>
+
+        <FieldRow label="Lecture video (min)">
+          <NumInput value={module.lectureVideoMin} onChange={upd('lectureVideoMin')} step={0.25} />
+        </FieldRow>
+        <FieldRow label="Lecture PPT (slides)">
+          <NumInput value={module.lectureSlides} onChange={upd('lectureSlides')} />
+        </FieldRow>
+
+        <FieldRow label="ILO complexity">
+          <Select value={module.iloComplexity} onChange={upd('iloComplexity')} options={Object.keys(ILO_COMPLEXITY)} />
+        </FieldRow>
+        <FieldRow label="ILO units">
+          <NumInput value={module.iloUnits} onChange={upd('iloUnits')} />
+        </FieldRow>
+
+        <FieldRow label="Audiovisual (min)">
+          <NumInput value={module.audiovisualMin} onChange={upd('audiovisualMin')} step={0.25} />
+        </FieldRow>
+      </Section>
+
+      <Section title="Assignments">
+        <FieldRow label="Discussion initial posts">
+          <NumInput value={module.discussionInitial} onChange={upd('discussionInitial')} />
+        </FieldRow>
+        <FieldRow label="Discussion replies">
+          <NumInput value={module.discussionReply} onChange={upd('discussionReply')} />
+        </FieldRow>
+
+        <FieldRow label="Assignment #1 type">
+          <Select value={module.assignment1Type} onChange={upd('assignment1Type')} options={Object.keys(ASSIGNMENT_HOURS)} />
+        </FieldRow>
+        <FieldRow label="Assignment #1 count">
+          <NumInput value={module.assignment1Count} onChange={upd('assignment1Count')} />
+        </FieldRow>
+
+        <FieldRow label="Assignment #2 type">
+          <Select value={module.assignment2Type} onChange={upd('assignment2Type')} options={Object.keys(ASSIGNMENT_HOURS)} />
+        </FieldRow>
+        <FieldRow label="Assignment #2 count">
+          <NumInput value={module.assignment2Count} onChange={upd('assignment2Count')} />
+        </FieldRow>
+
+        <FieldRow label="Quiz questions">
+          <NumInput value={module.quizQuestions} onChange={upd('quizQuestions')} />
+        </FieldRow>
+        <FieldRow label="Exam questions">
+          <NumInput value={module.examQuestions} onChange={upd('examQuestions')} />
+        </FieldRow>
+
+        <FieldRow label="Writing type">
+          <Select value={module.writingType} onChange={upd('writingType')} options={WRITING_TYPES} />
+        </FieldRow>
+        <FieldRow label="Drafting level">
+          <Select value={module.writingDrafting} onChange={upd('writingDrafting')} options={DRAFTING_LEVELS} />
+        </FieldRow>
+        <FieldRow label="Writing pages">
+          <NumInput value={module.writingPages} onChange={upd('writingPages')} />
+        </FieldRow>
+
+        <FieldRow label="Project type">
+          <Select value={module.projectType} onChange={upd('projectType')} options={Object.keys(PROJECT_HOURS)} />
+        </FieldRow>
+        <FieldRow label="Project count">
+          <NumInput value={module.projectCount} onChange={upd('projectCount')} />
+        </FieldRow>
+        <FieldRow label="Hours per project">
+          <NumInput value={module.projectHoursEach} onChange={upd('projectHoursEach')} step={0.5} />
+        </FieldRow>
+
+        <FieldRow label="Student study time (hrs)">
+          <NumInput value={module.studyTime} onChange={upd('studyTime')} step={0.25} />
+        </FieldRow>
+        <FieldRow label="Adjustments (hrs)">
+          <NumInput value={module.adjustments} onChange={upd('adjustments')} step={0.25} />
+        </FieldRow>
+      </Section>
+
+      <div style={{ background: '#f9fafb', borderRadius: '6px', padding: '10px', fontSize: '12px', color: '#374151' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span>Live meeting:</span><span>{fmt(results.liveMeeting)} hrs</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span>Learning content:</span><span>{fmt(results.learningContent)} hrs</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span>Assignments:</span><span>{fmt(results.assignments)} hrs</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
+// MAIN APP
+// ============================================================
+
+export default function LearningTimeCalculator() {
+  const [courseName, setCourseName] = useState('');
+  const [credits, setCredits] = useState(3);
+  const [modality, setModality] = useState('Asynchronous');
+  const [termLength, setTermLength] = useState(15); // 7 or 15
+  const [view, setView] = useState('week'); // 'week' or 'semester'
+  const [activeModule, setActiveModule] = useState(0);
+
+  const moduleCount = termLength + 1; // includes Module 0
+  const [modules, setModules] = useState(() =>
+    Array.from({ length: 16 }, () => makeEmptyModule())
+  );
+
+  const targetHours = credits * HOURS_PER_CREDIT;
+  const visibleModules = modules.slice(0, moduleCount);
+
+  const results = useMemo(() =>
+    visibleModules.map(m => calcModule(m)),
+    [visibleModules]
+  );
+
+  const totals = useMemo(() => {
+    const live = results.reduce((s, r) => s + r.liveMeeting, 0);
+    const learn = results.reduce((s, r) => s + r.learningContent, 0);
+    const assign = results.reduce((s, r) => s + r.assignments, 0);
+    return { live, learn, assign, grand: live + learn + assign };
+  }, [results]);
+
+  const updateModule = (idx, m) => {
+    const next = [...modules];
+    next[idx] = m;
+    setModules(next);
+  };
+
+  const handleTermChange = (newTerm) => {
+    setTermLength(newTerm);
+    if (activeModule > newTerm) setActiveModule(0);
+  };
+
+  // ---- Chart data ----
+  const chartData = useMemo(() => {
+    if (view === 'week') {
+      return results.map((r, i) => ({
+        name: `Mod ${i}`,
+        'Live Meeting': +r.liveMeeting.toFixed(2),
+        'Learning Content': +r.learningContent.toFixed(2),
+        'Assignments': +r.assignments.toFixed(2),
+        Total: +r.moduleTotal.toFixed(2),
+      }));
+    }
+    return [{
+      name: 'Semester Total',
+      'Live Meeting': +totals.live.toFixed(2),
+      'Learning Content': +totals.learn.toFixed(2),
+      'Assignments': +totals.assign.toFixed(2),
+    }];
+  }, [view, results, totals]);
+
+  const pieData = [
+    { name: 'Live Meeting', value: +totals.live.toFixed(2) },
+    { name: 'Learning Content', value: +totals.learn.toFixed(2) },
+    { name: 'Assignments', value: +totals.assign.toFixed(2) },
+  ].filter(d => d.value > 0);
+
+  const pieColors = ['#2563eb', '#10b981', '#f59e0b'];
+
+  // ---- PDF export via browser print ----
+  const handleExport = () => {
+    window.print();
+  };
+
+  const variance = totals.grand - targetHours;
+  const variancePct = targetHours ? (variance / targetHours) * 100 : 0;
+
+  return (
+    <div style={{ fontFamily: 'system-ui, -apple-system, sans-serif', background: '#f3f4f6', minHeight: '100vh', padding: '20px', color: '#111827' }}>
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          body { background: white !important; }
+          .print-page { page-break-after: always; }
+        }
+      `}</style>
+
+      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+        {/* HEADER */}
+        <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '20px', marginBottom: '16px' }}>
+          <h1 style={{ margin: '0 0 4px 0', fontSize: '22px' }}>Learning Time Analysis</h1>
+          <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#6b7280' }}>
+            Estimate total student learning time across course modules. Based on Pitt's credit-hour standard ({HOURS_PER_CREDIT} hrs / credit).
+          </p>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Course name</label>
+              <input
+                type="text"
+                value={courseName}
+                onChange={(e) => setCourseName(e.target.value)}
+                placeholder="e.g., HHD 2007"
+                style={{ width: '100%', padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '14px' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Credits</label>
+              <input
+                type="number"
+                value={credits}
+                onChange={(e) => setCredits(+e.target.value || 0)}
+                min={0}
+                step={1}
+                style={{ width: '100%', padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '14px' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Modality</label>
+              <select
+                value={modality}
+                onChange={(e) => setModality(e.target.value)}
+                style={{ width: '100%', padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '14px', background: 'white' }}
+              >
+                <option>Asynchronous</option>
+                <option>Synchronous</option>
+                <option>Hybrid</option>
+                <option>In-person</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Term length</label>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  className="no-print"
+                  onClick={() => handleTermChange(7)}
+                  style={{ flex: 1, padding: '6px', border: '1px solid #d1d5db', borderRadius: '4px', background: termLength === 7 ? '#2563eb' : 'white', color: termLength === 7 ? 'white' : '#111827', cursor: 'pointer', fontSize: '13px' }}
+                >7 weeks</button>
+                <button
+                  className="no-print"
+                  onClick={() => handleTermChange(15)}
+                  style={{ flex: 1, padding: '6px', border: '1px solid #d1d5db', borderRadius: '4px', background: termLength === 15 ? '#2563eb' : 'white', color: termLength === 15 ? 'white' : '#111827', cursor: 'pointer', fontSize: '13px' }}
+                >15 weeks</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* SUMMARY + CONTROLS */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px', marginBottom: '16px' }}>
+          <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontSize: '12px', color: '#6b7280' }}>Target</div>
+                  <div style={{ fontSize: '24px', fontWeight: 600 }}>{targetHours} <span style={{ fontSize: '14px', fontWeight: 400, color: '#6b7280' }}>hrs</span></div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '12px', color: '#6b7280' }}>Calculated</div>
+                  <div style={{ fontSize: '24px', fontWeight: 600 }}>{fmt(totals.grand)} <span style={{ fontSize: '14px', fontWeight: 400, color: '#6b7280' }}>hrs</span></div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '12px', color: '#6b7280' }}>Variance</div>
+                  <div style={{ fontSize: '24px', fontWeight: 600, color: Math.abs(variancePct) <= 10 ? '#10b981' : Math.abs(variancePct) <= 20 ? '#f59e0b' : '#ef4444' }}>
+                    {variance >= 0 ? '+' : ''}{fmt(variance)} <span style={{ fontSize: '14px', fontWeight: 400 }}>({variancePct >= 0 ? '+' : ''}{fmt(variancePct)}%)</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="no-print" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', border: '1px solid #d1d5db', borderRadius: '6px', overflow: 'hidden' }}>
+                  <button
+                    onClick={() => setView('week')}
+                    style={{ padding: '8px 16px', border: 'none', background: view === 'week' ? '#2563eb' : 'white', color: view === 'week' ? 'white' : '#111827', cursor: 'pointer', fontSize: '13px' }}
+                  >Week view</button>
+                  <button
+                    onClick={() => setView('semester')}
+                    style={{ padding: '8px 16px', border: 'none', background: view === 'semester' ? '#2563eb' : 'white', color: view === 'semester' ? 'white' : '#111827', cursor: 'pointer', fontSize: '13px' }}
+                  >Semester view</button>
+                </div>
+                <button
+                  onClick={handleExport}
+                  style={{ padding: '8px 16px', border: '1px solid #2563eb', borderRadius: '6px', background: '#2563eb', color: 'white', cursor: 'pointer', fontSize: '13px' }}
+                >Export PDF</button>
+              </div>
+            </div>
+
+            {/* CHARTS */}
+            {view === 'week' ? (
+              <div style={{ width: '100%', height: 320 }}>
+                <ResponsiveContainer>
+                  <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} label={{ value: 'Hours', angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: '#6b7280' } }} />
+                    <Tooltip />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    <Bar dataKey="Live Meeting" stackId="a" fill="#2563eb" />
+                    <Bar dataKey="Learning Content" stackId="a" fill="#10b981" />
+                    <Bar dataKey="Assignments" stackId="a" fill="#f59e0b" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                <div style={{ height: 280 }}>
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={(entry) => `${entry.name}: ${entry.value}h`}>
+                        {pieData.map((entry, i) => <Cell key={i} fill={pieColors[i]} />)}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                        <th style={{ textAlign: 'left', padding: '8px', color: '#6b7280', fontWeight: 600 }}>Category</th>
+                        <th style={{ textAlign: 'right', padding: '8px', color: '#6b7280', fontWeight: 600 }}>Hours</th>
+                        <th style={{ textAlign: 'right', padding: '8px', color: '#6b7280', fontWeight: 600 }}>% of total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
+                        <td style={{ padding: '8px' }}><span style={{ display: 'inline-block', width: 10, height: 10, background: '#2563eb', borderRadius: 2, marginRight: 8 }}/>Live Meeting</td>
+                        <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.live)}</td>
+                        <td style={{ textAlign: 'right', padding: '8px' }}>{totals.grand ? fmt(totals.live / totals.grand * 100) : '0.00'}%</td>
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
+                        <td style={{ padding: '8px' }}><span style={{ display: 'inline-block', width: 10, height: 10, background: '#10b981', borderRadius: 2, marginRight: 8 }}/>Learning Content</td>
+                        <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.learn)}</td>
+                        <td style={{ textAlign: 'right', padding: '8px' }}>{totals.grand ? fmt(totals.learn / totals.grand * 100) : '0.00'}%</td>
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
+                        <td style={{ padding: '8px' }}><span style={{ display: 'inline-block', width: 10, height: 10, background: '#f59e0b', borderRadius: 2, marginRight: 8 }}/>Assignments</td>
+                        <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.assign)}</td>
+                        <td style={{ textAlign: 'right', padding: '8px' }}>{totals.grand ? fmt(totals.assign / totals.grand * 100) : '0.00'}%</td>
+                      </tr>
+                      <tr style={{ fontWeight: 600 }}>
+                        <td style={{ padding: '8px' }}>Total</td>
+                        <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.grand)}</td>
+                        <td style={{ textAlign: 'right', padding: '8px' }}>100.00%</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* MODULE TABS + EDITOR */}
+        <div className="no-print" style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '12px' }}>
+          {visibleModules.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => setActiveModule(i)}
+              style={{
+                padding: '6px 12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '4px',
+                background: activeModule === i ? '#111827' : 'white',
+                color: activeModule === i ? 'white' : '#111827',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: activeModule === i ? 600 : 400,
+              }}
+            >
+              Mod {i}
+              {results[i] && results[i].moduleTotal > 0.5 && (
+                <span style={{ marginLeft: '6px', fontSize: '10px', opacity: 0.7 }}>
+                  {fmt(results[i].moduleTotal)}h
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        <div className="no-print">
+          <ModuleEditor
+            module={modules[activeModule]}
+            onChange={(m) => updateModule(activeModule, m)}
+            moduleIndex={activeModule}
+            results={results[activeModule]}
+          />
+        </div>
+
+        {/* PRINT-ONLY DETAILED TABLE */}
+        <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '20px', marginTop: '16px' }}>
+          <h2 style={{ margin: '0 0 12px 0', fontSize: '18px' }}>Per-module breakdown</h2>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #e5e7eb', background: '#f9fafb' }}>
+                  <th style={{ textAlign: 'left', padding: '8px' }}>Module</th>
+                  <th style={{ textAlign: 'right', padding: '8px' }}>Live Meeting</th>
+                  <th style={{ textAlign: 'right', padding: '8px' }}>Learning Content</th>
+                  <th style={{ textAlign: 'right', padding: '8px' }}>Assignments</th>
+                  <th style={{ textAlign: 'right', padding: '8px' }}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                    <td style={{ padding: '8px' }}>Module {i}</td>
+                    <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(r.liveMeeting)}</td>
+                    <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(r.learningContent)}</td>
+                    <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(r.assignments)}</td>
+                    <td style={{ textAlign: 'right', padding: '8px', fontWeight: 600 }}>{fmt(r.moduleTotal)}</td>
+                  </tr>
+                ))}
+                <tr style={{ borderTop: '2px solid #111827', fontWeight: 600, background: '#f9fafb' }}>
+                  <td style={{ padding: '8px' }}>Semester Total</td>
+                  <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.live)}</td>
+                  <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.learn)}</td>
+                  <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.assign)}</td>
+                  <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.grand)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style={{ marginTop: '12px', fontSize: '12px', color: '#6b7280' }}>
+            {courseName && <span><strong>{courseName}</strong> · </span>}
+            {credits} credit{credits !== 1 ? 's' : ''} · {modality} · {termLength}-week term · Target {targetHours} hrs
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
