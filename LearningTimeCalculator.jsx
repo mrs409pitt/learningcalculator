@@ -1,5 +1,37 @@
-import React, { useState, useMemo, useRef } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Learning Time Analysis Calculator</title>
+<meta name="description" content="Estimate total student learning time across course modules. Based on the credit-hour standard of 45 hrs per credit." />
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f3f4f6;
+    color: #111827;
+    min-height: 100vh;
+  }
+  button { font-family: inherit; }
+  input, select { font-family: inherit; }
+  @media print {
+    .no-print { display: none !important; }
+    body { background: white !important; }
+    .panel { border: none !important; box-shadow: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useMemo, useEffect, useRef } = React;
 
 // ============================================================
 // LOOKUP TABLES (sourced directly from the Excel workbook)
@@ -57,7 +89,6 @@ const PROJECT_HOURS = {
 const WRITING_TYPES = ['Reflection/Narrative', 'Argument', 'Research'];
 const DRAFTING_LEVELS = ['No Drafting', 'Minimal Drafting', 'Extensive Drafting'];
 
-// Credit hour standard (Pitt): 1 credit = 45 hrs learning time, 3 credits = 135 hrs
 const HOURS_PER_CREDIT = 45;
 
 // ============================================================
@@ -66,7 +97,6 @@ const HOURS_PER_CREDIT = 45;
 
 const makeEmptyModule = () => ({
   liveMeeting: 0,
-  // Learning content
   reading1Type: 'Textbook (standard)',
   reading1Purpose: 'Comprehension',
   reading1Pages: 0,
@@ -79,7 +109,6 @@ const makeEmptyModule = () => ({
   iloComplexity: 'Medium',
   iloUnits: 0,
   audiovisualMin: 0,
-  // Assignments
   discussionInitial: 0,
   discussionReply: 0,
   assignment1Type: 'Journal Entry (private)',
@@ -99,7 +128,7 @@ const makeEmptyModule = () => ({
 });
 
 // ============================================================
-// CALCULATION LOGIC (mirrors the Excel formulas)
+// CALCULATION LOGIC
 // ============================================================
 
 const calcReadingHours = (type, purpose, pages) => {
@@ -110,7 +139,7 @@ const calcReadingHours = (type, purpose, pages) => {
 };
 
 const calcModule = (m) => {
-  const reviewExpectations = 0.5; // baseline per module
+  const reviewExpectations = 0.5;
   const reading1 = calcReadingHours(m.reading1Type, m.reading1Purpose, +m.reading1Pages);
   const reading2 = calcReadingHours(m.reading2Type, m.reading2Purpose, +m.reading2Pages);
   const lectureVideo = (+m.lectureVideoMin * 2) / 60;
@@ -121,8 +150,8 @@ const calcModule = (m) => {
   const learningContent =
     reviewExpectations + reading1 + reading2 + lectureVideo + lectureSlides + ilo + audiovisual;
 
-  const discussionInitial = (+m.discussionInitial * 60) / 60; // 1 hr each
-  const discussionReply = (+m.discussionReply * 15) / 60; // 0.25 hr each
+  const discussionInitial = (+m.discussionInitial * 60) / 60;
+  const discussionReply = (+m.discussionReply * 15) / 60;
   const assignment1 = (+m.assignment1Count) * (ASSIGNMENT_HOURS[m.assignment1Type] || 0);
   const assignment2 = (+m.assignment2Count) * (ASSIGNMENT_HOURS[m.assignment2Type] || 0);
   const quiz = (+m.quizQuestions * 1.5) / 60;
@@ -130,7 +159,7 @@ const calcModule = (m) => {
   const writingKey = `${m.writingType}|${m.writingDrafting}`;
   const writing = (+m.writingPages) * (WRITING_HOURS_PER_PAGE[writingKey] || 0);
   const project = (+m.projectCount) * (PROJECT_HOURS[m.projectType] || 0) * (+m.projectHoursEach);
-  const studyTime = (+m.studyTime * 75) / 60; // 1.25x multiplier
+  const studyTime = (+m.studyTime * 75) / 60;
   const adjustments = +m.adjustments;
 
   const assignments =
@@ -140,17 +169,7 @@ const calcModule = (m) => {
   const liveMeeting = +m.liveMeeting;
   const moduleTotal = liveMeeting + learningContent + assignments;
 
-  return {
-    liveMeeting,
-    learningContent,
-    assignments,
-    moduleTotal,
-    breakdown: {
-      reviewExpectations, reading1, reading2, lectureVideo, lectureSlides, ilo, audiovisual,
-      discussionInitial, discussionReply, assignment1, assignment2,
-      quiz, exam, writing, project, studyTime, adjustments,
-    }
-  };
+  return { liveMeeting, learningContent, assignments, moduleTotal };
 };
 
 // ============================================================
@@ -188,7 +207,29 @@ const Select = ({ value, onChange, options }) => (
 );
 
 // ============================================================
-// MODULE EDITOR PANEL
+// CHART COMPONENT (Chart.js wrapper)
+// ============================================================
+
+const ChartCanvas = ({ type, data, options }) => {
+  const canvasRef = useRef(null);
+  const chartRef = useRef(null);
+
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    if (chartRef.current) {
+      chartRef.current.destroy();
+    }
+    chartRef.current = new Chart(canvasRef.current, { type, data, options });
+    return () => {
+      if (chartRef.current) chartRef.current.destroy();
+    };
+  }, [type, JSON.stringify(data), JSON.stringify(options)]);
+
+  return <canvas ref={canvasRef} />;
+};
+
+// ============================================================
+// MODULE EDITOR
 // ============================================================
 
 const ModuleEditor = ({ module, onChange, moduleIndex, results }) => {
@@ -204,7 +245,7 @@ const ModuleEditor = ({ module, onChange, moduleIndex, results }) => {
   );
 
   return (
-    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
+    <div className="panel" style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '16px' }}>
         <h3 style={{ margin: 0, fontSize: '18px', color: '#111827' }}>Module {moduleIndex}</h3>
         <div style={{ fontSize: '13px', color: '#6b7280' }}>
@@ -334,15 +375,15 @@ const ModuleEditor = ({ module, onChange, moduleIndex, results }) => {
 // MAIN APP
 // ============================================================
 
-export default function LearningTimeCalculator() {
+function LearningTimeCalculator() {
   const [courseName, setCourseName] = useState('');
   const [credits, setCredits] = useState(3);
   const [modality, setModality] = useState('Asynchronous');
-  const [termLength, setTermLength] = useState(15); // 7 or 15
-  const [view, setView] = useState('week'); // 'week' or 'semester'
+  const [termLength, setTermLength] = useState(15);
+  const [view, setView] = useState('week');
   const [activeModule, setActiveModule] = useState(0);
 
-  const moduleCount = termLength + 1; // includes Module 0
+  const moduleCount = termLength + 1;
   const [modules, setModules] = useState(() =>
     Array.from({ length: 16 }, () => makeEmptyModule())
   );
@@ -373,57 +414,62 @@ export default function LearningTimeCalculator() {
     if (activeModule > newTerm) setActiveModule(0);
   };
 
-  // ---- Chart data ----
-  const chartData = useMemo(() => {
-    if (view === 'week') {
-      return results.map((r, i) => ({
-        name: `Mod ${i}`,
-        'Live Meeting': +r.liveMeeting.toFixed(2),
-        'Learning Content': +r.learningContent.toFixed(2),
-        'Assignments': +r.assignments.toFixed(2),
-        Total: +r.moduleTotal.toFixed(2),
-      }));
+  // Chart data
+  const weekChartData = useMemo(() => ({
+    labels: results.map((_, i) => `Mod ${i}`),
+    datasets: [
+      { label: 'Live Meeting', data: results.map(r => +r.liveMeeting.toFixed(2)), backgroundColor: '#2563eb' },
+      { label: 'Learning Content', data: results.map(r => +r.learningContent.toFixed(2)), backgroundColor: '#10b981' },
+      { label: 'Assignments', data: results.map(r => +r.assignments.toFixed(2)), backgroundColor: '#f59e0b' },
+    ]
+  }), [results]);
+
+  const weekChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      x: { stacked: true, ticks: { font: { size: 11 } } },
+      y: { stacked: true, ticks: { font: { size: 11 } }, title: { display: true, text: 'Hours', font: { size: 12 } } }
+    },
+    plugins: {
+      legend: { position: 'bottom', labels: { font: { size: 12 } } },
+      tooltip: { mode: 'index', intersect: false }
     }
-    return [{
-      name: 'Semester Total',
-      'Live Meeting': +totals.live.toFixed(2),
-      'Learning Content': +totals.learn.toFixed(2),
-      'Assignments': +totals.assign.toFixed(2),
-    }];
-  }, [view, results, totals]);
-
-  const pieData = [
-    { name: 'Live Meeting', value: +totals.live.toFixed(2) },
-    { name: 'Learning Content', value: +totals.learn.toFixed(2) },
-    { name: 'Assignments', value: +totals.assign.toFixed(2) },
-  ].filter(d => d.value > 0);
-
-  const pieColors = ['#2563eb', '#10b981', '#f59e0b'];
-
-  // ---- PDF export via browser print ----
-  const handleExport = () => {
-    window.print();
   };
+
+  const semesterChartData = useMemo(() => ({
+    labels: ['Live Meeting', 'Learning Content', 'Assignments'],
+    datasets: [{
+      data: [+totals.live.toFixed(2), +totals.learn.toFixed(2), +totals.assign.toFixed(2)],
+      backgroundColor: ['#2563eb', '#10b981', '#f59e0b'],
+    }]
+  }), [totals]);
+
+  const semesterChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'right', labels: { font: { size: 12 } } },
+      tooltip: { callbacks: {
+        label: (ctx) => `${ctx.label}: ${ctx.raw} hrs`
+      }}
+    }
+  };
+
+  const handleExport = () => window.print();
 
   const variance = totals.grand - targetHours;
   const variancePct = targetHours ? (variance / targetHours) * 100 : 0;
+  const varianceColor = Math.abs(variancePct) <= 10 ? '#10b981' : Math.abs(variancePct) <= 20 ? '#f59e0b' : '#ef4444';
 
   return (
-    <div style={{ fontFamily: 'system-ui, -apple-system, sans-serif', background: '#f3f4f6', minHeight: '100vh', padding: '20px', color: '#111827' }}>
-      <style>{`
-        @media print {
-          .no-print { display: none !important; }
-          body { background: white !important; }
-          .print-page { page-break-after: always; }
-        }
-      `}</style>
-
+    <div style={{ padding: '20px' }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         {/* HEADER */}
-        <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '20px', marginBottom: '16px' }}>
+        <div className="panel" style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '20px', marginBottom: '16px' }}>
           <h1 style={{ margin: '0 0 4px 0', fontSize: '22px' }}>Learning Time Analysis</h1>
           <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#6b7280' }}>
-            Estimate total student learning time across course modules. Based on Pitt's credit-hour standard ({HOURS_PER_CREDIT} hrs / credit).
+            Estimate total student learning time across course modules. Based on the credit-hour standard ({HOURS_PER_CREDIT} hrs / credit).
           </p>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
@@ -479,112 +525,91 @@ export default function LearningTimeCalculator() {
           </div>
         </div>
 
-        {/* SUMMARY + CONTROLS */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px', marginBottom: '16px' }}>
-          <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
-              <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
-                <div>
-                  <div style={{ fontSize: '12px', color: '#6b7280' }}>Target</div>
-                  <div style={{ fontSize: '24px', fontWeight: 600 }}>{targetHours} <span style={{ fontSize: '14px', fontWeight: 400, color: '#6b7280' }}>hrs</span></div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '12px', color: '#6b7280' }}>Calculated</div>
-                  <div style={{ fontSize: '24px', fontWeight: 600 }}>{fmt(totals.grand)} <span style={{ fontSize: '14px', fontWeight: 400, color: '#6b7280' }}>hrs</span></div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '12px', color: '#6b7280' }}>Variance</div>
-                  <div style={{ fontSize: '24px', fontWeight: 600, color: Math.abs(variancePct) <= 10 ? '#10b981' : Math.abs(variancePct) <= 20 ? '#f59e0b' : '#ef4444' }}>
-                    {variance >= 0 ? '+' : ''}{fmt(variance)} <span style={{ fontSize: '14px', fontWeight: 400 }}>({variancePct >= 0 ? '+' : ''}{fmt(variancePct)}%)</span>
-                  </div>
-                </div>
+        {/* SUMMARY + CHART */}
+        <div className="panel" style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '20px', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: '12px', color: '#6b7280' }}>Target</div>
+                <div style={{ fontSize: '24px', fontWeight: 600 }}>{targetHours} <span style={{ fontSize: '14px', fontWeight: 400, color: '#6b7280' }}>hrs</span></div>
               </div>
-
-              <div className="no-print" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <div style={{ display: 'flex', border: '1px solid #d1d5db', borderRadius: '6px', overflow: 'hidden' }}>
-                  <button
-                    onClick={() => setView('week')}
-                    style={{ padding: '8px 16px', border: 'none', background: view === 'week' ? '#2563eb' : 'white', color: view === 'week' ? 'white' : '#111827', cursor: 'pointer', fontSize: '13px' }}
-                  >Week view</button>
-                  <button
-                    onClick={() => setView('semester')}
-                    style={{ padding: '8px 16px', border: 'none', background: view === 'semester' ? '#2563eb' : 'white', color: view === 'semester' ? 'white' : '#111827', cursor: 'pointer', fontSize: '13px' }}
-                  >Semester view</button>
+              <div>
+                <div style={{ fontSize: '12px', color: '#6b7280' }}>Calculated</div>
+                <div style={{ fontSize: '24px', fontWeight: 600 }}>{fmt(totals.grand)} <span style={{ fontSize: '14px', fontWeight: 400, color: '#6b7280' }}>hrs</span></div>
+              </div>
+              <div>
+                <div style={{ fontSize: '12px', color: '#6b7280' }}>Variance</div>
+                <div style={{ fontSize: '24px', fontWeight: 600, color: varianceColor }}>
+                  {variance >= 0 ? '+' : ''}{fmt(variance)} <span style={{ fontSize: '14px', fontWeight: 400 }}>({variancePct >= 0 ? '+' : ''}{fmt(variancePct)}%)</span>
                 </div>
-                <button
-                  onClick={handleExport}
-                  style={{ padding: '8px 16px', border: '1px solid #2563eb', borderRadius: '6px', background: '#2563eb', color: 'white', cursor: 'pointer', fontSize: '13px' }}
-                >Export PDF</button>
               </div>
             </div>
 
-            {/* CHARTS */}
-            {view === 'week' ? (
-              <div style={{ width: '100%', height: 320 }}>
-                <ResponsiveContainer>
-                  <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                    <YAxis tick={{ fontSize: 11 }} label={{ value: 'Hours', angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: '#6b7280' } }} />
-                    <Tooltip />
-                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Bar dataKey="Live Meeting" stackId="a" fill="#2563eb" />
-                    <Bar dataKey="Learning Content" stackId="a" fill="#10b981" />
-                    <Bar dataKey="Assignments" stackId="a" fill="#f59e0b" />
-                  </BarChart>
-                </ResponsiveContainer>
+            <div className="no-print" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', border: '1px solid #d1d5db', borderRadius: '6px', overflow: 'hidden' }}>
+                <button
+                  onClick={() => setView('week')}
+                  style={{ padding: '8px 16px', border: 'none', background: view === 'week' ? '#2563eb' : 'white', color: view === 'week' ? 'white' : '#111827', cursor: 'pointer', fontSize: '13px' }}
+                >Week view</button>
+                <button
+                  onClick={() => setView('semester')}
+                  style={{ padding: '8px 16px', border: 'none', background: view === 'semester' ? '#2563eb' : 'white', color: view === 'semester' ? 'white' : '#111827', cursor: 'pointer', fontSize: '13px' }}
+                >Semester view</button>
               </div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                <div style={{ height: 280 }}>
-                  <ResponsiveContainer>
-                    <PieChart>
-                      <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={(entry) => `${entry.name}: ${entry.value}h`}>
-                        {pieData.map((entry, i) => <Cell key={i} fill={pieColors[i]} />)}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                        <th style={{ textAlign: 'left', padding: '8px', color: '#6b7280', fontWeight: 600 }}>Category</th>
-                        <th style={{ textAlign: 'right', padding: '8px', color: '#6b7280', fontWeight: 600 }}>Hours</th>
-                        <th style={{ textAlign: 'right', padding: '8px', color: '#6b7280', fontWeight: 600 }}>% of total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                        <td style={{ padding: '8px' }}><span style={{ display: 'inline-block', width: 10, height: 10, background: '#2563eb', borderRadius: 2, marginRight: 8 }}/>Live Meeting</td>
-                        <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.live)}</td>
-                        <td style={{ textAlign: 'right', padding: '8px' }}>{totals.grand ? fmt(totals.live / totals.grand * 100) : '0.00'}%</td>
-                      </tr>
-                      <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                        <td style={{ padding: '8px' }}><span style={{ display: 'inline-block', width: 10, height: 10, background: '#10b981', borderRadius: 2, marginRight: 8 }}/>Learning Content</td>
-                        <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.learn)}</td>
-                        <td style={{ textAlign: 'right', padding: '8px' }}>{totals.grand ? fmt(totals.learn / totals.grand * 100) : '0.00'}%</td>
-                      </tr>
-                      <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                        <td style={{ padding: '8px' }}><span style={{ display: 'inline-block', width: 10, height: 10, background: '#f59e0b', borderRadius: 2, marginRight: 8 }}/>Assignments</td>
-                        <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.assign)}</td>
-                        <td style={{ textAlign: 'right', padding: '8px' }}>{totals.grand ? fmt(totals.assign / totals.grand * 100) : '0.00'}%</td>
-                      </tr>
-                      <tr style={{ fontWeight: 600 }}>
-                        <td style={{ padding: '8px' }}>Total</td>
-                        <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.grand)}</td>
-                        <td style={{ textAlign: 'right', padding: '8px' }}>100.00%</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+              <button
+                onClick={handleExport}
+                style={{ padding: '8px 16px', border: '1px solid #2563eb', borderRadius: '6px', background: '#2563eb', color: 'white', cursor: 'pointer', fontSize: '13px' }}
+              >Export PDF</button>
+            </div>
           </div>
+
+          {view === 'week' ? (
+            <div style={{ width: '100%', height: 320 }}>
+              <ChartCanvas type="bar" data={weekChartData} options={weekChartOptions} />
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+              <div style={{ height: 280 }}>
+                <ChartCanvas type="doughnut" data={semesterChartData} options={semesterChartOptions} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                      <th style={{ textAlign: 'left', padding: '8px', color: '#6b7280', fontWeight: 600 }}>Category</th>
+                      <th style={{ textAlign: 'right', padding: '8px', color: '#6b7280', fontWeight: 600 }}>Hours</th>
+                      <th style={{ textAlign: 'right', padding: '8px', color: '#6b7280', fontWeight: 600 }}>% of total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
+                      <td style={{ padding: '8px' }}><span style={{ display: 'inline-block', width: 10, height: 10, background: '#2563eb', borderRadius: 2, marginRight: 8 }}/>Live Meeting</td>
+                      <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.live)}</td>
+                      <td style={{ textAlign: 'right', padding: '8px' }}>{totals.grand ? fmt(totals.live / totals.grand * 100) : '0.00'}%</td>
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
+                      <td style={{ padding: '8px' }}><span style={{ display: 'inline-block', width: 10, height: 10, background: '#10b981', borderRadius: 2, marginRight: 8 }}/>Learning Content</td>
+                      <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.learn)}</td>
+                      <td style={{ textAlign: 'right', padding: '8px' }}>{totals.grand ? fmt(totals.learn / totals.grand * 100) : '0.00'}%</td>
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
+                      <td style={{ padding: '8px' }}><span style={{ display: 'inline-block', width: 10, height: 10, background: '#f59e0b', borderRadius: 2, marginRight: 8 }}/>Assignments</td>
+                      <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.assign)}</td>
+                      <td style={{ textAlign: 'right', padding: '8px' }}>{totals.grand ? fmt(totals.assign / totals.grand * 100) : '0.00'}%</td>
+                    </tr>
+                    <tr style={{ fontWeight: 600 }}>
+                      <td style={{ padding: '8px' }}>Total</td>
+                      <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.grand)}</td>
+                      <td style={{ textAlign: 'right', padding: '8px' }}>100.00%</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* MODULE TABS + EDITOR */}
+        {/* MODULE TABS */}
         <div className="no-print" style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '12px' }}>
           {visibleModules.map((_, i) => (
             <button
@@ -620,8 +645,8 @@ export default function LearningTimeCalculator() {
           />
         </div>
 
-        {/* PRINT-ONLY DETAILED TABLE */}
-        <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '20px', marginTop: '16px' }}>
+        {/* DETAILED TABLE */}
+        <div className="panel" style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '20px', marginTop: '16px' }}>
           <h2 style={{ margin: '0 0 12px 0', fontSize: '18px' }}>Per-module breakdown</h2>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
@@ -659,7 +684,16 @@ export default function LearningTimeCalculator() {
             {credits} credit{credits !== 1 ? 's' : ''} · {modality} · {termLength}-week term · Target {targetHours} hrs
           </div>
         </div>
+
+        <div className="no-print" style={{ marginTop: '24px', textAlign: 'center', fontSize: '12px', color: '#9ca3af' }}>
+          Learning Time Analysis Calculator · Open source
+        </div>
       </div>
     </div>
   );
 }
+
+ReactDOM.createRoot(document.getElementById('root')).render(<LearningTimeCalculator />);
+</script>
+</body>
+</html>
