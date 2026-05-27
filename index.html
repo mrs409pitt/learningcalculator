@@ -247,7 +247,7 @@ const ModuleEditor = ({ module, onChange, moduleIndex, results }) => {
   return (
     <div className="panel" style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '16px' }}>
-        <h3 style={{ margin: 0, fontSize: '18px', color: '#111827' }}>Module {moduleIndex}</h3>
+        <h3 style={{ margin: 0, fontSize: '18px', color: '#111827' }}>Module {moduleIndex + 1}</h3>
         <div style={{ fontSize: '13px', color: '#6b7280' }}>
           Total: <span style={{ fontWeight: 600, color: '#111827' }}>{fmt(results.moduleTotal)} hrs</span>
         </div>
@@ -380,12 +380,14 @@ function LearningTimeCalculator() {
   const [credits, setCredits] = useState(3);
   const [modality, setModality] = useState('Asynchronous');
   const [termLength, setTermLength] = useState(15);
-  const [view, setView] = useState('week');
+  const [view, setView] = useState('semester');
   const [activeModule, setActiveModule] = useState(0);
 
-  const moduleCount = termLength + 1;
+  // Modules are 1-indexed externally (Module 1 through Module 15)
+  // Stored as a 0-indexed array of length termLength
+  const moduleCount = termLength;
   const [modules, setModules] = useState(() =>
-    Array.from({ length: 16 }, () => makeEmptyModule())
+    Array.from({ length: 15 }, () => makeEmptyModule())
   );
 
   const targetHours = credits * HOURS_PER_CREDIT;
@@ -411,12 +413,12 @@ function LearningTimeCalculator() {
 
   const handleTermChange = (newTerm) => {
     setTermLength(newTerm);
-    if (activeModule > newTerm) setActiveModule(0);
+    if (activeModule >= newTerm) setActiveModule(0);
   };
 
   // Chart data
   const weekChartData = useMemo(() => ({
-    labels: results.map((_, i) => `Mod ${i}`),
+    labels: results.map((_, i) => `Mod ${i + 1}`),
     datasets: [
       { label: 'Live Meeting', data: results.map(r => +r.liveMeeting.toFixed(2)), backgroundColor: '#2563eb' },
       { label: 'Learning Content', data: results.map(r => +r.learningContent.toFixed(2)), backgroundColor: '#10b981' },
@@ -626,7 +628,7 @@ function LearningTimeCalculator() {
                 fontWeight: activeModule === i ? 600 : 400,
               }}
             >
-              Mod {i}
+              Mod {i + 1}
               {results[i] && results[i].moduleTotal > 0.5 && (
                 <span style={{ marginLeft: '6px', fontSize: '10px', opacity: 0.7 }}>
                   {fmt(results[i].moduleTotal)}h
@@ -662,7 +664,7 @@ function LearningTimeCalculator() {
               <tbody>
                 {results.map((r, i) => (
                   <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '8px' }}>Module {i}</td>
+                    <td style={{ padding: '8px' }}>Module {i + 1}</td>
                     <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(r.liveMeeting)}</td>
                     <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(r.learningContent)}</td>
                     <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(r.assignments)}</td>
