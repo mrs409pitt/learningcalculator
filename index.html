@@ -34,6 +34,13 @@
 const { useState, useMemo, useEffect, useRef } = React;
 
 // ============================================================
+// BRAND COLORS (University of Pittsburgh palette)
+// ============================================================
+const PITT_BLUE = '#003594';   // Pitt Royal
+const PITT_GOLD = '#FFB81C';   // Pitt Gold
+const PITT_ACCENT = '#0067A0'; // supporting blue
+
+// ============================================================
 // LOOKUP TABLES (sourced directly from the Excel workbook)
 // ============================================================
 
@@ -89,7 +96,11 @@ const PROJECT_HOURS = {
 const WRITING_TYPES = ['Reflection/Narrative', 'Argument', 'Research'];
 const DRAFTING_LEVELS = ['No Drafting', 'Minimal Drafting', 'Extensive Drafting'];
 
+// Term-length options (weeks). See beta-review note re: verifying the full set.
+const TERM_OPTIONS = [4, 6, 7, 8, 12, 15];
+
 const HOURS_PER_CREDIT = 45;
+const MAX_WEEKS = 15; // largest supported term
 
 // ============================================================
 // EMPTY MODULE FACTORY
@@ -125,6 +136,7 @@ const makeEmptyModule = () => ({
   projectHoursEach: 1,
   studyTime: 0,
   adjustments: 0,
+  adjustmentsNote: '',
 });
 
 // ============================================================
@@ -173,14 +185,20 @@ const calcModule = (m) => {
 };
 
 // ============================================================
-// UI HELPERS
+// UI HELPERS  (all defined at module scope so inputs never remount)
 // ============================================================
 
 const fmt = (n) => (Math.round(n * 100) / 100).toFixed(2);
 
-const FieldRow = ({ label, children }) => (
+const moduleLabel = (i) => (i === 0 ? 'Orientation (Module 0)' : `Module ${i}`);
+const moduleTab = (i) => (i === 0 ? 'Orient.' : `Mod ${i}`);
+
+const FieldRow = ({ label, hint, children }) => (
   <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: '8px', alignItems: 'center', marginBottom: '6px' }}>
-    <label style={{ fontSize: '13px', color: '#374151' }}>{label}</label>
+    <label title={hint || undefined} style={{ fontSize: '13px', color: '#374151', cursor: hint ? 'help' : 'default' }}>
+      {label}
+      {hint && <span style={{ marginLeft: '4px', color: '#9ca3af', fontSize: '11px' }} title={hint}>&#9432;</span>}
+    </label>
     <div>{children}</div>
   </div>
 );
@@ -196,6 +214,16 @@ const NumInput = ({ value, onChange, step = 1, min = 0 }) => (
   />
 );
 
+const TextInput = ({ value, onChange, placeholder }) => (
+  <input
+    type="text"
+    value={value}
+    onChange={(e) => onChange(e.target.value)}
+    placeholder={placeholder}
+    style={{ width: '100%', padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '13px' }}
+  />
+);
+
 const Select = ({ value, onChange, options }) => (
   <select
     value={value}
@@ -204,6 +232,15 @@ const Select = ({ value, onChange, options }) => (
   >
     {options.map(o => <option key={o} value={o}>{o}</option>)}
   </select>
+);
+
+const Section = ({ title, children }) => (
+  <div style={{ marginBottom: '16px' }}>
+    <div style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6b7280', marginBottom: '8px', borderBottom: '1px solid #e5e7eb', paddingBottom: '4px' }}>
+      {title}
+    </div>
+    {children}
+  </div>
 );
 
 // ============================================================
@@ -235,125 +272,122 @@ const ChartCanvas = ({ type, data, options }) => {
 const ModuleEditor = ({ module, onChange, moduleIndex, results }) => {
   const upd = (key) => (val) => onChange({ ...module, [key]: val });
 
-  const Section = ({ title, children }) => (
-    <div style={{ marginBottom: '16px' }}>
-      <div style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6b7280', marginBottom: '8px', borderBottom: '1px solid #e5e7eb', paddingBottom: '4px' }}>
-        {title}
-      </div>
-      {children}
-    </div>
-  );
-
   return (
     <div className="panel" style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '16px' }}>
-        <h3 style={{ margin: 0, fontSize: '18px', color: '#111827' }}>Module {moduleIndex + 1}</h3>
+        <h3 style={{ margin: 0, fontSize: '18px', color: '#111827' }}>{moduleLabel(moduleIndex)}</h3>
         <div style={{ fontSize: '13px', color: '#6b7280' }}>
           Total: <span style={{ fontWeight: 600, color: '#111827' }}>{fmt(results.moduleTotal)} hrs</span>
         </div>
       </div>
 
       <Section title="Live Meeting">
-        <FieldRow label="Live meeting (hrs)">
+        <FieldRow label="Live meeting (hrs)" hint="Synchronous contact time: lecture, clinical, or lab hours.">
           <NumInput value={module.liveMeeting} onChange={upd('liveMeeting')} step={0.25} />
         </FieldRow>
       </Section>
 
-      <Section title="Learning Content">
-        <FieldRow label="Reading #1 type">
+      <Section title="Instructional Materials">
+        <FieldRow label="Reading #1 type" hint="Textbook (standard/technical) or article/handout — sets words per page.">
           <Select value={module.reading1Type} onChange={upd('reading1Type')} options={Object.keys(READING_TYPES)} />
         </FieldRow>
-        <FieldRow label="Reading #1 purpose">
+        <FieldRow label="Reading #1 purpose" hint="Reading goal sets the reading speed (words per minute).">
           <Select value={module.reading1Purpose} onChange={upd('reading1Purpose')} options={Object.keys(READING_PURPOSES)} />
         </FieldRow>
-        <FieldRow label="Reading #1 pages">
+        <FieldRow label="Reading #1 pages" hint="Enter the number of pages assigned.">
           <NumInput value={module.reading1Pages} onChange={upd('reading1Pages')} />
         </FieldRow>
 
-        <FieldRow label="Reading #2 type">
+        <FieldRow label="Reading #2 type" hint="A second reading of a different type, if applicable.">
           <Select value={module.reading2Type} onChange={upd('reading2Type')} options={Object.keys(READING_TYPES)} />
         </FieldRow>
-        <FieldRow label="Reading #2 purpose">
+        <FieldRow label="Reading #2 purpose" hint="Reading goal sets the reading speed (words per minute).">
           <Select value={module.reading2Purpose} onChange={upd('reading2Purpose')} options={Object.keys(READING_PURPOSES)} />
         </FieldRow>
-        <FieldRow label="Reading #2 pages">
+        <FieldRow label="Reading #2 pages" hint="Enter the number of pages assigned.">
           <NumInput value={module.reading2Pages} onChange={upd('reading2Pages')} />
         </FieldRow>
 
-        <FieldRow label="Lecture video (min)">
+        <FieldRow label="Lecture video (min)" hint="Runtime in minutes. Student time is estimated at 2x runtime.">
           <NumInput value={module.lectureVideoMin} onChange={upd('lectureVideoMin')} step={0.25} />
         </FieldRow>
-        <FieldRow label="Lecture PPT (slides)">
+        <FieldRow label="Lecture PPT (slides)" hint="Number of slides. Estimated at 1.5 min per slide.">
           <NumInput value={module.lectureSlides} onChange={upd('lectureSlides')} />
         </FieldRow>
 
-        <FieldRow label="ILO complexity">
+        <FieldRow label="ILO complexity" hint="Interactive Learning Object. Low = 1 min, Medium = 3 min, High = 7 min per unit.">
           <Select value={module.iloComplexity} onChange={upd('iloComplexity')} options={Object.keys(ILO_COMPLEXITY)} />
         </FieldRow>
-        <FieldRow label="ILO units">
+        <FieldRow label="ILO units" hint="Number of interactive objects (e.g., H5P activities, simulations).">
           <NumInput value={module.iloUnits} onChange={upd('iloUnits')} />
         </FieldRow>
 
-        <FieldRow label="Audiovisual (min)">
+        <FieldRow label="Audiovisual (min)" hint="Podcasts, external video, etc. Estimated at 2x runtime.">
           <NumInput value={module.audiovisualMin} onChange={upd('audiovisualMin')} step={0.25} />
         </FieldRow>
       </Section>
 
       <Section title="Assignments">
-        <FieldRow label="Discussion initial posts">
+        <FieldRow label="Discussion initial posts" hint="Count of original posts. 1 hr each.">
           <NumInput value={module.discussionInitial} onChange={upd('discussionInitial')} />
         </FieldRow>
-        <FieldRow label="Discussion replies">
+        <FieldRow label="Discussion replies" hint="Count of reply posts. 15 min each.">
           <NumInput value={module.discussionReply} onChange={upd('discussionReply')} />
         </FieldRow>
 
-        <FieldRow label="Assignment #1 type">
+        <FieldRow label="Assignment #1 type" hint="Blog/journal = 0.5 hr; case study/problem solving = 1 hr each.">
           <Select value={module.assignment1Type} onChange={upd('assignment1Type')} options={Object.keys(ASSIGNMENT_HOURS)} />
         </FieldRow>
-        <FieldRow label="Assignment #1 count">
+        <FieldRow label="Assignment #1 count" hint="Number of items of this type.">
           <NumInput value={module.assignment1Count} onChange={upd('assignment1Count')} />
         </FieldRow>
 
-        <FieldRow label="Assignment #2 type">
+        <FieldRow label="Assignment #2 type" hint="A second assignment type, if applicable.">
           <Select value={module.assignment2Type} onChange={upd('assignment2Type')} options={Object.keys(ASSIGNMENT_HOURS)} />
         </FieldRow>
-        <FieldRow label="Assignment #2 count">
+        <FieldRow label="Assignment #2 count" hint="Number of items of this type.">
           <NumInput value={module.assignment2Count} onChange={upd('assignment2Count')} />
         </FieldRow>
 
-        <FieldRow label="Quiz questions">
+        <FieldRow label="Quiz questions" hint="Total quiz questions. 1.5 min each.">
           <NumInput value={module.quizQuestions} onChange={upd('quizQuestions')} />
         </FieldRow>
-        <FieldRow label="Exam questions">
+        <FieldRow label="Exam questions" hint="Total exam questions. 1.5 min each.">
           <NumInput value={module.examQuestions} onChange={upd('examQuestions')} />
         </FieldRow>
 
-        <FieldRow label="Writing type">
+        <FieldRow label="Writing type" hint="Reflection/Narrative, Argument, or Research — sets hours per page.">
           <Select value={module.writingType} onChange={upd('writingType')} options={WRITING_TYPES} />
         </FieldRow>
-        <FieldRow label="Drafting level">
+        <FieldRow label="Drafting level" hint="More drafting = more hours per page.">
           <Select value={module.writingDrafting} onChange={upd('writingDrafting')} options={DRAFTING_LEVELS} />
         </FieldRow>
-        <FieldRow label="Writing pages">
+        <FieldRow label="Writing pages" hint="Target page count for the written work.">
           <NumInput value={module.writingPages} onChange={upd('writingPages')} />
         </FieldRow>
 
-        <FieldRow label="Project type">
+        <FieldRow label="Project type" hint="Group, media, written, or presentation project.">
           <Select value={module.projectType} onChange={upd('projectType')} options={Object.keys(PROJECT_HOURS)} />
         </FieldRow>
-        <FieldRow label="Project count">
+        <FieldRow label="Project count" hint="Number of projects of this type.">
           <NumInput value={module.projectCount} onChange={upd('projectCount')} />
         </FieldRow>
-        <FieldRow label="Hours per project">
+        <FieldRow label="Hours per project" hint="Estimated student hours for each project.">
           <NumInput value={module.projectHoursEach} onChange={upd('projectHoursEach')} step={0.5} />
         </FieldRow>
 
-        <FieldRow label="Student study time (hrs)">
+        <FieldRow label="Student study time (hrs)" hint="Independent study/review. Weighted at 1.25x entered hours.">
           <NumInput value={module.studyTime} onChange={upd('studyTime')} step={0.25} />
         </FieldRow>
-        <FieldRow label="Adjustments (hrs)">
+        <FieldRow label="Adjustments (hrs)" hint="Use this to add time for any activity type not listed above.">
           <NumInput value={module.adjustments} onChange={upd('adjustments')} step={0.25} />
         </FieldRow>
+        <FieldRow label="Adjustment notes" hint="Optional: describe what the adjustment hours account for.">
+          <TextInput value={module.adjustmentsNote} onChange={upd('adjustmentsNote')} placeholder="e.g., field observation, guest speaker prep" />
+        </FieldRow>
+        <div style={{ fontSize: '11px', color: '#6b7280', fontStyle: 'italic', marginTop: '2px', marginBottom: '8px' }}>
+          If your course includes an activity type not listed here, use the Adjustments row to account for that time and add a note.
+        </div>
       </Section>
 
       <div style={{ background: '#f9fafb', borderRadius: '6px', padding: '10px', fontSize: '12px', color: '#374151' }}>
@@ -361,7 +395,7 @@ const ModuleEditor = ({ module, onChange, moduleIndex, results }) => {
           <span>Live meeting:</span><span>{fmt(results.liveMeeting)} hrs</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span>Learning content:</span><span>{fmt(results.learningContent)} hrs</span>
+          <span>Instructional materials:</span><span>{fmt(results.learningContent)} hrs</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span>Assignments:</span><span>{fmt(results.assignments)} hrs</span>
@@ -380,30 +414,38 @@ function LearningTimeCalculator() {
   const [credits, setCredits] = useState(3);
   const [modality, setModality] = useState('Asynchronous');
   const [termLength, setTermLength] = useState(15);
+  const [includeOrientation, setIncludeOrientation] = useState(true);
   const [view, setView] = useState('semester');
   const [activeModule, setActiveModule] = useState(0);
 
-  // Modules are 1-indexed externally (Module 1 through Module 15)
-  // Stored as a 0-indexed array of length termLength
-  const moduleCount = termLength;
+  // Fixed store: index i === "Module i" (0 = orientation, 1..15 = teaching weeks)
   const [modules, setModules] = useState(() =>
-    Array.from({ length: 15 }, () => makeEmptyModule())
+    Array.from({ length: MAX_WEEKS + 1 }, () => makeEmptyModule())
   );
 
   const targetHours = credits * HOURS_PER_CREDIT;
-  const visibleModules = modules.slice(0, moduleCount);
 
-  const results = useMemo(() =>
-    visibleModules.map(m => calcModule(m)),
-    [visibleModules]
+  // Which module indices are currently visible
+  const visibleIndices = useMemo(() => {
+    const first = includeOrientation ? 0 : 1;
+    const arr = [];
+    for (let i = first; i <= termLength; i++) arr.push(i);
+    return arr;
+  }, [includeOrientation, termLength]);
+
+  const visible = useMemo(
+    () => visibleIndices.map(i => ({ index: i, result: calcModule(modules[i]) })),
+    [visibleIndices, modules]
   );
 
   const totals = useMemo(() => {
-    const live = results.reduce((s, r) => s + r.liveMeeting, 0);
-    const learn = results.reduce((s, r) => s + r.learningContent, 0);
-    const assign = results.reduce((s, r) => s + r.assignments, 0);
+    const live = visible.reduce((s, v) => s + v.result.liveMeeting, 0);
+    const learn = visible.reduce((s, v) => s + v.result.learningContent, 0);
+    const assign = visible.reduce((s, v) => s + v.result.assignments, 0);
     return { live, learn, assign, grand: live + learn + assign };
-  }, [results]);
+  }, [visible]);
+
+  const editorResult = calcModule(modules[activeModule]);
 
   const updateModule = (idx, m) => {
     const next = [...modules];
@@ -411,20 +453,26 @@ function LearningTimeCalculator() {
     setModules(next);
   };
 
-  const handleTermChange = (newTerm) => {
-    setTermLength(newTerm);
-    if (activeModule >= newTerm) setActiveModule(0);
+  const handleTermChange = (val) => {
+    const t = +val;
+    setTermLength(t);
+    if (activeModule > t) setActiveModule(includeOrientation ? 0 : 1);
   };
 
-  // Chart data
+  const handleOrientationToggle = (checked) => {
+    setIncludeOrientation(checked);
+    if (!checked && activeModule === 0) setActiveModule(1);
+  };
+
+  // ---- Chart data ----
   const weekChartData = useMemo(() => ({
-    labels: results.map((_, i) => `Mod ${i + 1}`),
+    labels: visible.map(v => (v.index === 0 ? 'Orient.' : `Mod ${v.index}`)),
     datasets: [
-      { label: 'Live Meeting', data: results.map(r => +r.liveMeeting.toFixed(2)), backgroundColor: '#2563eb' },
-      { label: 'Learning Content', data: results.map(r => +r.learningContent.toFixed(2)), backgroundColor: '#10b981' },
-      { label: 'Assignments', data: results.map(r => +r.assignments.toFixed(2)), backgroundColor: '#f59e0b' },
+      { label: 'Live Meeting', data: visible.map(v => +v.result.liveMeeting.toFixed(2)), backgroundColor: PITT_BLUE },
+      { label: 'Instructional Materials', data: visible.map(v => +v.result.learningContent.toFixed(2)), backgroundColor: PITT_GOLD },
+      { label: 'Assignments', data: visible.map(v => +v.result.assignments.toFixed(2)), backgroundColor: PITT_ACCENT },
     ]
-  }), [results]);
+  }), [visible]);
 
   const weekChartOptions = {
     responsive: true,
@@ -440,10 +488,10 @@ function LearningTimeCalculator() {
   };
 
   const semesterChartData = useMemo(() => ({
-    labels: ['Live Meeting', 'Learning Content', 'Assignments'],
+    labels: ['Live Meeting', 'Instructional Materials', 'Assignments'],
     datasets: [{
       data: [+totals.live.toFixed(2), +totals.learn.toFixed(2), +totals.assign.toFixed(2)],
-      backgroundColor: ['#2563eb', '#10b981', '#f59e0b'],
+      backgroundColor: [PITT_BLUE, PITT_GOLD, PITT_ACCENT],
     }]
   }), [totals]);
 
@@ -452,29 +500,37 @@ function LearningTimeCalculator() {
     maintainAspectRatio: false,
     plugins: {
       legend: { position: 'right', labels: { font: { size: 12 } } },
-      tooltip: { callbacks: {
-        label: (ctx) => `${ctx.label}: ${ctx.raw} hrs`
-      }}
+      tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.raw} hrs` } }
     }
   };
 
-  const handleExport = () => window.print();
+  // ---- PDF export: set a sensible default filename via document.title ----
+  const handleExport = () => {
+    const prev = document.title;
+    document.title = courseName
+      ? `Learning Time Analysis - ${courseName}`
+      : 'Learning Time Analysis';
+    window.print();
+    setTimeout(() => { document.title = prev; }, 800);
+  };
 
   const variance = totals.grand - targetHours;
   const variancePct = targetHours ? (variance / targetHours) * 100 : 0;
   const varianceColor = Math.abs(variancePct) <= 10 ? '#10b981' : Math.abs(variancePct) <= 20 ? '#f59e0b' : '#ef4444';
 
+  const swatch = (color) => ({ display: 'inline-block', width: 10, height: 10, background: color, borderRadius: 2, marginRight: 8 });
+
   return (
     <div style={{ padding: '20px' }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         {/* HEADER */}
-        <div className="panel" style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '20px', marginBottom: '16px' }}>
+        <div className="panel" style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '20px', marginBottom: '16px', borderTop: `4px solid ${PITT_BLUE}` }}>
           <h1 style={{ margin: '0 0 4px 0', fontSize: '22px' }}>Learning Time Analysis</h1>
           <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#6b7280' }}>
             Estimate total student learning time across course modules. Based on the credit-hour standard ({HOURS_PER_CREDIT} hrs / credit).
           </p>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Course name</label>
               <input
@@ -510,19 +566,24 @@ function LearningTimeCalculator() {
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Term length</label>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button
-                  className="no-print"
-                  onClick={() => handleTermChange(7)}
-                  style={{ flex: 1, padding: '6px', border: '1px solid #d1d5db', borderRadius: '4px', background: termLength === 7 ? '#2563eb' : 'white', color: termLength === 7 ? 'white' : '#111827', cursor: 'pointer', fontSize: '13px' }}
-                >7 weeks</button>
-                <button
-                  className="no-print"
-                  onClick={() => handleTermChange(15)}
-                  style={{ flex: 1, padding: '6px', border: '1px solid #d1d5db', borderRadius: '4px', background: termLength === 15 ? '#2563eb' : 'white', color: termLength === 15 ? 'white' : '#111827', cursor: 'pointer', fontSize: '13px' }}
-                >15 weeks</button>
-              </div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Term length (weeks)</label>
+              <select
+                value={termLength}
+                onChange={(e) => handleTermChange(e.target.value)}
+                style={{ width: '100%', padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '14px', background: 'white' }}
+              >
+                {TERM_OPTIONS.map(w => <option key={w} value={w}>{w} weeks</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#374151', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={includeOrientation}
+                  onChange={(e) => handleOrientationToggle(e.target.checked)}
+                />
+                Include orientation (Module 0)
+              </label>
             </div>
           </div>
         </div>
@@ -551,16 +612,16 @@ function LearningTimeCalculator() {
               <div style={{ display: 'flex', border: '1px solid #d1d5db', borderRadius: '6px', overflow: 'hidden' }}>
                 <button
                   onClick={() => setView('week')}
-                  style={{ padding: '8px 16px', border: 'none', background: view === 'week' ? '#2563eb' : 'white', color: view === 'week' ? 'white' : '#111827', cursor: 'pointer', fontSize: '13px' }}
+                  style={{ padding: '8px 16px', border: 'none', background: view === 'week' ? PITT_BLUE : 'white', color: view === 'week' ? 'white' : '#111827', cursor: 'pointer', fontSize: '13px' }}
                 >Week view</button>
                 <button
                   onClick={() => setView('semester')}
-                  style={{ padding: '8px 16px', border: 'none', background: view === 'semester' ? '#2563eb' : 'white', color: view === 'semester' ? 'white' : '#111827', cursor: 'pointer', fontSize: '13px' }}
+                  style={{ padding: '8px 16px', border: 'none', background: view === 'semester' ? PITT_BLUE : 'white', color: view === 'semester' ? 'white' : '#111827', cursor: 'pointer', fontSize: '13px' }}
                 >Semester view</button>
               </div>
               <button
                 onClick={handleExport}
-                style={{ padding: '8px 16px', border: '1px solid #2563eb', borderRadius: '6px', background: '#2563eb', color: 'white', cursor: 'pointer', fontSize: '13px' }}
+                style={{ padding: '8px 16px', border: `1px solid ${PITT_BLUE}`, borderRadius: '6px', background: PITT_BLUE, color: 'white', cursor: 'pointer', fontSize: '13px' }}
               >Export PDF</button>
             </div>
           </div>
@@ -585,17 +646,17 @@ function LearningTimeCalculator() {
                   </thead>
                   <tbody>
                     <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                      <td style={{ padding: '8px' }}><span style={{ display: 'inline-block', width: 10, height: 10, background: '#2563eb', borderRadius: 2, marginRight: 8 }}/>Live Meeting</td>
+                      <td style={{ padding: '8px' }}><span style={swatch(PITT_BLUE)}/>Live Meeting</td>
                       <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.live)}</td>
                       <td style={{ textAlign: 'right', padding: '8px' }}>{totals.grand ? fmt(totals.live / totals.grand * 100) : '0.00'}%</td>
                     </tr>
                     <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                      <td style={{ padding: '8px' }}><span style={{ display: 'inline-block', width: 10, height: 10, background: '#10b981', borderRadius: 2, marginRight: 8 }}/>Learning Content</td>
+                      <td style={{ padding: '8px' }}><span style={swatch(PITT_GOLD)}/>Instructional Materials</td>
                       <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.learn)}</td>
                       <td style={{ textAlign: 'right', padding: '8px' }}>{totals.grand ? fmt(totals.learn / totals.grand * 100) : '0.00'}%</td>
                     </tr>
                     <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                      <td style={{ padding: '8px' }}><span style={{ display: 'inline-block', width: 10, height: 10, background: '#f59e0b', borderRadius: 2, marginRight: 8 }}/>Assignments</td>
+                      <td style={{ padding: '8px' }}><span style={swatch(PITT_ACCENT)}/>Assignments</td>
                       <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(totals.assign)}</td>
                       <td style={{ textAlign: 'right', padding: '8px' }}>{totals.grand ? fmt(totals.assign / totals.grand * 100) : '0.00'}%</td>
                     </tr>
@@ -613,25 +674,25 @@ function LearningTimeCalculator() {
 
         {/* MODULE TABS */}
         <div className="no-print" style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '12px' }}>
-          {visibleModules.map((_, i) => (
+          {visible.map(v => (
             <button
-              key={i}
-              onClick={() => setActiveModule(i)}
+              key={v.index}
+              onClick={() => setActiveModule(v.index)}
               style={{
                 padding: '6px 12px',
                 border: '1px solid #d1d5db',
                 borderRadius: '4px',
-                background: activeModule === i ? '#111827' : 'white',
-                color: activeModule === i ? 'white' : '#111827',
+                background: activeModule === v.index ? '#111827' : 'white',
+                color: activeModule === v.index ? 'white' : '#111827',
                 cursor: 'pointer',
                 fontSize: '12px',
-                fontWeight: activeModule === i ? 600 : 400,
+                fontWeight: activeModule === v.index ? 600 : 400,
               }}
             >
-              Mod {i + 1}
-              {results[i] && results[i].moduleTotal > 0.5 && (
+              {moduleTab(v.index)}
+              {v.result.moduleTotal > 0.5 && (
                 <span style={{ marginLeft: '6px', fontSize: '10px', opacity: 0.7 }}>
-                  {fmt(results[i].moduleTotal)}h
+                  {fmt(v.result.moduleTotal)}h
                 </span>
               )}
             </button>
@@ -643,7 +704,7 @@ function LearningTimeCalculator() {
             module={modules[activeModule]}
             onChange={(m) => updateModule(activeModule, m)}
             moduleIndex={activeModule}
-            results={results[activeModule]}
+            results={editorResult}
           />
         </div>
 
@@ -656,19 +717,19 @@ function LearningTimeCalculator() {
                 <tr style={{ borderBottom: '2px solid #e5e7eb', background: '#f9fafb' }}>
                   <th style={{ textAlign: 'left', padding: '8px' }}>Module</th>
                   <th style={{ textAlign: 'right', padding: '8px' }}>Live Meeting</th>
-                  <th style={{ textAlign: 'right', padding: '8px' }}>Learning Content</th>
+                  <th style={{ textAlign: 'right', padding: '8px' }}>Instructional Materials</th>
                   <th style={{ textAlign: 'right', padding: '8px' }}>Assignments</th>
                   <th style={{ textAlign: 'right', padding: '8px' }}>Total</th>
                 </tr>
               </thead>
               <tbody>
-                {results.map((r, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '8px' }}>Module {i + 1}</td>
-                    <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(r.liveMeeting)}</td>
-                    <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(r.learningContent)}</td>
-                    <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(r.assignments)}</td>
-                    <td style={{ textAlign: 'right', padding: '8px', fontWeight: 600 }}>{fmt(r.moduleTotal)}</td>
+                {visible.map(v => (
+                  <tr key={v.index} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                    <td style={{ padding: '8px' }}>{moduleLabel(v.index)}</td>
+                    <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(v.result.liveMeeting)}</td>
+                    <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(v.result.learningContent)}</td>
+                    <td style={{ textAlign: 'right', padding: '8px' }}>{fmt(v.result.assignments)}</td>
+                    <td style={{ textAlign: 'right', padding: '8px', fontWeight: 600 }}>{fmt(v.result.moduleTotal)}</td>
                   </tr>
                 ))}
                 <tr style={{ borderTop: '2px solid #111827', fontWeight: 600, background: '#f9fafb' }}>
@@ -682,13 +743,14 @@ function LearningTimeCalculator() {
             </table>
           </div>
           <div style={{ marginTop: '12px', fontSize: '12px', color: '#6b7280' }}>
-            {courseName && <span><strong>{courseName}</strong> · </span>}
-            {credits} credit{credits !== 1 ? 's' : ''} · {modality} · {termLength}-week term · Target {targetHours} hrs
+            {courseName && <span><strong>{courseName}</strong> &middot; </span>}
+            {credits} credit{credits !== 1 ? 's' : ''} &middot; {modality} &middot; {termLength}-week term
+            {includeOrientation ? ' + orientation' : ''} &middot; Target {targetHours} hrs
           </div>
         </div>
 
         <div className="no-print" style={{ marginTop: '24px', textAlign: 'center', fontSize: '12px', color: '#9ca3af' }}>
-          Learning Time Analysis Calculator · Open source
+          Learning Time Analysis Calculator &middot; Open source
         </div>
       </div>
     </div>
