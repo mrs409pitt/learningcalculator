@@ -1,1 +1,773 @@
-test
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Learning Time Analysis Calculator</title>
+
+  <!-- CDN dependencies (run in the browser; no build step) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <style>
+    :root{
+      --royal:#003594;      /* Pitt royal blue  */
+      --gold:#FFB81C;       /* Pitt gold        */
+      --blue:#0067A0;       /* supporting blue  */
+      --lightblue:#6CACE4;
+      --bronze:#C77A2B;
+      --grey:#9AA0A6;
+      --ink:#1c2b39;
+      --muted:#5b6b7a;
+      --line:#dce3ea;
+      --wash:#f4f6f9;
+      --paper:#ffffff;
+      --ok:#1f8a4c;
+      --warn:#c98a00;
+      --bad:#c0392b;
+    }
+    *{box-sizing:border-box;}
+    html,body{margin:0;padding:0;}
+    body{
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+      color:var(--ink);
+      background:var(--wash);
+      line-height:1.45;
+      -webkit-font-smoothing:antialiased;
+    }
+    h1,h2,h3{font-family:Georgia,"Times New Roman",serif;font-weight:600;letter-spacing:-0.01em;margin:0;}
+    .app{max-width:1080px;margin:0 auto;padding:0 20px 80px;}
+
+    /* ---------- sticky summary bar (Tier 2: running totals stay visible) ---------- */
+    .sticky{
+      position:sticky;top:0;z-index:40;
+      background:var(--royal);color:#fff;
+      border-bottom:3px solid var(--gold);
+      box-shadow:0 2px 10px rgba(0,0,0,.12);
+    }
+    .sticky-inner{
+      max-width:1080px;margin:0 auto;padding:8px 20px;
+      display:flex;align-items:center;gap:20px;flex-wrap:wrap;
+    }
+    .sticky .name{font-weight:600;opacity:.95;min-width:120px;}
+    .sticky .metric{display:flex;flex-direction:column;line-height:1.15;}
+    .sticky .metric .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;opacity:.75;}
+    .sticky .metric .v{font-size:18px;font-weight:700;}
+    .badge{margin-left:auto;padding:5px 12px;border-radius:999px;font-weight:700;font-size:13px;color:#0d1b2a;}
+    .badge.ok{background:#8fe0ad;} .badge.warn{background:var(--gold);} .badge.bad{background:#f5a89e;}
+
+    /* ---------- header ---------- */
+    header.masthead{
+      background:var(--paper);border:1px solid var(--line);border-top:5px solid var(--royal);
+      border-radius:0 0 12px 12px;padding:22px 26px;margin-bottom:20px;
+    }
+    header.masthead h1{color:var(--royal);font-size:27px;}
+    header.masthead p.sub{margin:4px 0 18px;color:var(--muted);font-size:14px;}
+    .controls{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;}
+    .ctl{display:flex;flex-direction:column;gap:4px;}
+    .ctl label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;}
+    .ctl input[type=text],.ctl input.num,.ctl select{
+      border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;background:#fff;min-height:38px;
+    }
+    .ctl input:focus,.ctl select:focus{outline:2px solid var(--blue);outline-offset:1px;border-color:var(--blue);}
+    .check{display:flex;align-items:center;gap:8px;font-size:14px;padding-bottom:8px;}
+    .check input{width:17px;height:17px;accent-color:var(--royal);}
+
+    /* ---------- buttons ---------- */
+    .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;}
+    button.btn{border:none;border-radius:8px;padding:9px 16px;font-size:14px;font-weight:600;cursor:pointer;}
+    button.primary{background:var(--royal);color:#fff;}
+    button.primary:hover{background:#00296f;}
+    button.gold{background:var(--gold);color:#3a2c00;}
+    button.gold:hover{filter:brightness(.96);}
+    button.ghost{background:#fff;color:var(--royal);border:1px solid var(--royal);}
+    button.ghost:hover{background:#eef3fb;}
+    button.tiny{background:transparent;border:1px solid var(--line);color:var(--muted);padding:3px 9px;font-size:12px;border-radius:6px;}
+    button.tiny:hover{border-color:var(--bad);color:var(--bad);}
+    button:focus-visible{outline:2px solid var(--blue);outline-offset:2px;}
+
+    /* ---------- view toggle ---------- */
+    .toggle{display:inline-flex;border:1px solid var(--royal);border-radius:999px;overflow:hidden;}
+    .toggle button{border:none;background:#fff;color:var(--royal);padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;}
+    .toggle button.active{background:var(--royal);color:#fff;}
+
+    /* ---------- cards / charts ---------- */
+    .card{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin-bottom:18px;}
+    .card h2{font-size:19px;color:var(--royal);margin-bottom:4px;}
+    .chart-area{position:relative;}
+    .chart-wrap{height:380px;position:relative;}
+    .chart-offscreen{position:absolute;left:-100000px;top:0;width:820px;height:380px;}
+    .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;}
+    .legend .sw{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);}
+    .legend .dot{width:13px;height:13px;border-radius:3px;}
+
+    /* ---------- module editor ---------- */
+    .module{background:var(--paper);border:1px solid var(--line);border-radius:12px;margin-bottom:16px;overflow:hidden;}
+    .module-head{display:flex;align-items:center;gap:12px;padding:14px 20px;background:linear-gradient(90deg,#eef3fb, #fff);border-bottom:1px solid var(--line);border-left:5px solid var(--royal);}
+    .module-head input.mname{flex:1;border:1px solid transparent;background:transparent;font-size:16px;font-weight:600;color:var(--royal);padding:6px 8px;border-radius:6px;min-width:60px;}
+    .module-head input.mname:hover{background:#fff;border-color:var(--line);}
+    .module-head input.mname:focus{background:#fff;border-color:var(--blue);outline:none;}
+    .module-head .mtotal{font-size:14px;color:var(--muted);white-space:nowrap;}
+    .module-head .mtotal b{color:var(--ink);font-size:16px;}
+    .module-body{padding:6px 20px 20px;}
+
+    .section{border-top:1px solid var(--line);padding:14px 0 4px;}
+    .section:first-child{border-top:none;}
+    .section-title{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:10px;}
+    .section-title .stub{font-weight:700;font-size:12px;color:var(--blue);text-transform:none;letter-spacing:0;margin-left:auto;background:#eef3fb;padding:2px 9px;border-radius:999px;}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px 16px;}
+    .field{display:flex;flex-direction:column;gap:4px;}
+    .field label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px;}
+    .field input,.field select{border:1px solid var(--line);border-radius:7px;padding:7px 9px;font-size:14px;background:#fff;min-height:36px;}
+    .field input:focus,.field select:focus{outline:2px solid var(--blue);outline-offset:1px;border-color:var(--blue);}
+    .field textarea{border:1px solid var(--line);border-radius:7px;padding:8px 9px;font-size:14px;resize:vertical;min-height:44px;font-family:inherit;}
+
+    /* dynamic reading rows */
+    .row-list{display:flex;flex-direction:column;gap:10px;}
+    .reading-row{display:grid;grid-template-columns:1.2fr 1fr 1.2fr auto;gap:10px;align-items:end;background:var(--wash);padding:10px;border-radius:9px;}
+    .add-row{align-self:flex-start;margin-top:8px;}
+
+    /* tooltip */
+    .tip{position:relative;display:inline-flex;cursor:help;}
+    .tip .i{width:15px;height:15px;border-radius:50%;background:var(--blue);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;font-style:normal;}
+    .tip .bubble{
+      position:absolute;bottom:130%;left:50%;transform:translateX(-50%);
+      background:var(--ink);color:#fff;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:400;
+      width:220px;line-height:1.35;text-transform:none;letter-spacing:0;
+      opacity:0;visibility:hidden;transition:opacity .12s;z-index:20;box-shadow:0 4px 14px rgba(0,0,0,.2);
+    }
+    .tip:hover .bubble,.tip:focus-within .bubble{opacity:1;visibility:visible;}
+
+    /* breakdown table */
+    table.breakdown{width:100%;border-collapse:collapse;font-size:14px;}
+    table.breakdown th,table.breakdown td{padding:9px 10px;text-align:right;border-bottom:1px solid var(--line);}
+    table.breakdown th:first-child,table.breakdown td:first-child{text-align:left;}
+    table.breakdown thead th{background:var(--royal);color:#fff;font-size:12px;text-transform:uppercase;letter-spacing:.04em;}
+    table.breakdown tbody tr:nth-child(even){background:var(--wash);}
+    table.breakdown tfoot td{font-weight:700;border-top:2px solid var(--royal);background:#eef3fb;}
+
+    .print-only{display:none;}
+    .hint{font-size:13px;color:var(--muted);background:#fff8e6;border:1px solid #ffe6a3;border-radius:8px;padding:10px 12px;margin:6px 0 2px;}
+
+    /* ---------- print / PDF ---------- */
+    @media print{
+      body{background:#fff;}
+      .sticky,.no-print,.masthead .controls,.masthead .btnrow,.toggle,.add-row,button,.module-head .mtotal button{display:none !important;}
+      .app{max-width:none;padding:0;}
+      .print-only{display:block;}
+      .card,.module{break-inside:avoid;border:1px solid #ccc;box-shadow:none;}
+      .chart-offscreen{position:static;left:auto;top:auto;width:100%;height:320px;}
+      .chart-wrap{height:320px;}
+      .print-both .chart-wrap,.print-both .chart-offscreen{height:300px;margin-bottom:8px;}
+      header.masthead{border-radius:0;}
+      .tip{display:none;}
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useMemo, useRef, useEffect } = React;
+
+    /* ============================ lookup tables ============================
+       These mirror the original Excel template's lookup tables. Where an exact
+       source value was unavailable, standard higher-ed defaults are used and are
+       easy to adjust here in one place. */
+    const WPM      = { light:300, moderate:250, complex:150 };          // reading speed (words/min)
+    const ILO_MIN  = { low:1, medium:3, high:7 };                        // minutes per interactive unit
+    const PROJ_MULT= { low:1, medium:1.5, high:2 };                      // project complexity multiplier
+    const WRITING  = {                                                   // hours per page = f(type, drafting)
+      reflection:{ single:0.5, revised:0.75, multiple:1.0 },
+      essay:     { single:1.0, revised:1.5,  multiple:2.0 },
+      research:  { single:1.5, revised:2.25, multiple:3.0 },
+    };
+    const VIDEO_MULT = 2;      // student engagement = 2x runtime
+    const AV_MULT    = 2;
+    const SLIDE_MIN  = 1.5;    // minutes per slide
+    const DISC_INIT  = 1;      // hours per initial discussion post
+    const DISC_REPLY = 0.25;   // hours per reply
+    const QUIZ_MIN   = 1.5;    // minutes per question
+    const STUDY_MULT = 1.25;   // study time weighted 1.25x
+    const BASELINE   = 0.5;    // "Review of Module Expectations" per module
+    const HRS_PER_CREDIT = 45; // credit-hour standard
+
+    const CATS = [
+      { key:'live',   label:'Live Meeting',            color:'var(--royal)',     hex:'#003594' },
+      { key:'instr',  label:'Instructional Materials', color:'var(--blue)',      hex:'#0067A0' },
+      { key:'assign', label:'Assignments',             color:'var(--gold)',      hex:'#FFB81C' },
+      { key:'assess', label:'Assessments',             color:'var(--bronze)',    hex:'#C77A2B' },
+      { key:'study',  label:'Study Time',              color:'var(--lightblue)', hex:'#6CACE4' },
+      { key:'adjust', label:'Adjustments',             color:'var(--grey)',      hex:'#9AA0A6' },
+    ];
+
+    const uid  = () => Math.random().toString(36).slice(2,9);
+    const r2   = n => Math.round((n + Number.EPSILON) * 100) / 100;
+    const num  = v => (typeof v === 'number' && isFinite(v)) ? v : 0;
+
+    function newReading(){ return { id:uid(), pages:0, wpp:500, diff:'moderate' }; }
+    function newModule(){
+      return {
+        id:uid(), name:'',
+        lectureHrs:0, clinicalHrs:0, labHrs:0,
+        readings:[ newReading() ],
+        videoMin:0, slides:0,
+        iloUnits:0, iloLevel:'medium',
+        avMin:0,
+        discInit:0, discReply:0,
+        quizQ:0, examQ:0,
+        writePages:0, writeType:'essay', writeDraft:'single',
+        projCount:0, projHrs:0, projCplx:'medium',
+        studyHrs:0,
+        adjustHrs:0, adjustNote:'',
+      };
+    }
+
+    /* ============================ calculation ============================ */
+    function calcModule(m){
+      const readingHrs = (m.readings||[]).reduce((s,rd)=>{
+        const wpm = WPM[rd.diff] || WPM.moderate;
+        return s + (num(rd.pages) * num(rd.wpp)) / wpm / 60;
+      }, 0);
+      const videoHrs = num(m.videoMin) * VIDEO_MULT / 60;
+      const slideHrs = num(m.slides) * SLIDE_MIN / 60;
+      const iloHrs   = num(m.iloUnits) * (ILO_MIN[m.iloLevel]||ILO_MIN.medium) / 60;
+      const avHrs    = num(m.avMin) * AV_MULT / 60;
+      const instr    = readingHrs + videoHrs + slideHrs + iloHrs + avHrs + BASELINE;
+
+      const live = num(m.lectureHrs) + num(m.clinicalHrs) + num(m.labHrs);
+
+      const discHrs  = num(m.discInit) * DISC_INIT + num(m.discReply) * DISC_REPLY;
+      const writeHrs = num(m.writePages) * ((WRITING[m.writeType]||WRITING.essay)[m.writeDraft] || 1);
+      const projHrs  = num(m.projCount) * num(m.projHrs) * (PROJ_MULT[m.projCplx]||1);
+      const assign   = discHrs + writeHrs + projHrs;
+
+      const assess   = (num(m.quizQ) + num(m.examQ)) * QUIZ_MIN / 60;
+      const study    = num(m.studyHrs) * STUDY_MULT;
+      const adjust   = num(m.adjustHrs);
+
+      const total = live + instr + assign + assess + study + adjust;
+      return { live, instr, assign, assess, study, adjust, total,
+        detail:{ readingHrs, videoHrs, slideHrs, iloHrs, avHrs, discHrs, writeHrs, projHrs } };
+    }
+
+    function moduleLabel(i, includeOrientation){
+      if(includeOrientation) return i === 0 ? 'Module 0 · Orientation' : 'Module ' + i;
+      return 'Module ' + (i + 1);
+    }
+
+    function varianceStatus(pct){
+      const a = Math.abs(pct);
+      if(a <= 10) return 'ok';
+      if(a <= 20) return 'warn';
+      return 'bad';
+    }
+
+    /* safe arithmetic: supports "+31" (adds to current), full "20+31*2" etc. */
+    function evalExpr(raw, current){
+      let s = String(raw).trim();
+      if(s === '') return 0;
+      if(/^[+\-*/]/.test(s)) s = current + ' ' + s;   // leading operator applies to current value
+      if(!/^[0-9+\-*/(). ]+$/.test(s)) return NaN;      // strict whitelist — no identifiers, no eval risk
+      try{
+        const v = Function('"use strict";return(' + s + ')')();
+        return (typeof v === 'number' && isFinite(v)) ? v : NaN;
+      }catch(e){ return NaN; }
+    }
+
+    /* ============================ small components (TOP-LEVEL) ============================
+       Defining these at module scope — never inside another component's render — is what keeps
+       inputs mounted so focus, cursor position and scroll survive every keystroke. */
+
+    function Tip({ text }){
+      return (
+        <span className="tip" tabIndex={0} aria-label={text}>
+          <i className="i">i</i>
+          <span className="bubble">{text}</span>
+        </span>
+      );
+    }
+
+    // Expression-aware numeric field. Commits on blur / Enter so you can type freely (and do math).
+    function CalcInput({ value, onCommit, min=0, placeholder='0', ariaLabel }){
+      const [focused, setFocused] = useState(false);
+      const [text, setText] = useState('');
+      const display = focused ? text : (num(value) === 0 ? '' : String(r2(value)));
+      const commit = () => {
+        const parsed = evalExpr(text, num(value));
+        if(!isNaN(parsed)) onCommit(Math.max(min, parsed));
+        setFocused(false);
+      };
+      return (
+        <input
+          type="text" inputMode="decimal" placeholder={placeholder} aria-label={ariaLabel}
+          value={display}
+          onFocus={() => { setText(num(value) === 0 ? '' : String(r2(value))); setFocused(true); }}
+          onChange={e => setText(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if(e.key === 'Enter'){ e.preventDefault(); e.currentTarget.blur(); } }}
+        />
+      );
+    }
+
+    function Field({ label, tip, children }){
+      return (
+        <div className="field">
+          <label>{label}{tip ? <Tip text={tip} /> : null}</label>
+          {children}
+        </div>
+      );
+    }
+
+    function Section({ title, subtotal, children }){
+      return (
+        <div className="section">
+          <div className="section-title">
+            <span>{title}</span>
+            {subtotal !== undefined && <span className="stub">{r2(subtotal)} hrs</span>}
+          </div>
+          {children}
+        </div>
+      );
+    }
+
+    /* ---- charts (top-level; create/destroy Chart.js instances via effect) ---- */
+    function BarChart({ modules, includeOrientation }){
+      const ref = useRef(null); const inst = useRef(null);
+      useEffect(() => {
+        if(!ref.current) return;
+        const labels = modules.map((m,i) => m.name || moduleLabel(i, includeOrientation));
+        const per = modules.map(calcModule);
+        const datasets = CATS.map(c => ({
+          label:c.label, backgroundColor:c.hex,
+          data:per.map(p => r2(p[c.key])), stack:'s', borderWidth:0,
+        }));
+        inst.current = new Chart(ref.current, {
+          type:'bar',
+          data:{ labels, datasets },
+          options:{
+            responsive:true, maintainAspectRatio:false,
+            plugins:{ legend:{ display:false }, tooltip:{ callbacks:{ label:c => c.dataset.label + ': ' + c.parsed.y + ' hrs' } } },
+            scales:{ x:{ stacked:true, grid:{ display:false } },
+                     y:{ stacked:true, title:{ display:true, text:'Hours' }, beginAtZero:true } },
+          },
+        });
+        return () => { if(inst.current) inst.current.destroy(); };
+      }, [modules, includeOrientation]);
+      return <canvas ref={ref} />;
+    }
+
+    function DoughnutChart({ totals }){
+      const ref = useRef(null); const inst = useRef(null);
+      useEffect(() => {
+        if(!ref.current) return;
+        inst.current = new Chart(ref.current, {
+          type:'doughnut',
+          data:{ labels:CATS.map(c => c.label),
+                 datasets:[{ data:CATS.map(c => r2(totals[c.key])), backgroundColor:CATS.map(c => c.hex), borderWidth:2, borderColor:'#fff' }] },
+          options:{ responsive:true, maintainAspectRatio:false, cutout:'58%',
+                    plugins:{ legend:{ display:false },
+                              tooltip:{ callbacks:{ label:c => c.label + ': ' + c.parsed + ' hrs' } } } },
+        });
+        return () => { if(inst.current) inst.current.destroy(); };
+      }, [totals]);
+      return <canvas ref={ref} />;
+    }
+
+    function Legend(){
+      return (
+        <div className="legend">
+          {CATS.map(c => (
+            <span className="sw" key={c.key}><span className="dot" style={{background:c.hex}} />{c.label}</span>
+          ))}
+        </div>
+      );
+    }
+
+    /* ---- one module editor ---- */
+    function ModuleEditor({ m, index, includeOrientation, calc, onChange, onRemove, canRemove }){
+      const set   = (patch) => onChange({ ...m, ...patch });
+      const label = moduleLabel(index, includeOrientation);
+
+      const setReading = (id, patch) =>
+        set({ readings: m.readings.map(rd => rd.id === id ? { ...rd, ...patch } : rd) });
+      const addReading    = () => set({ readings:[ ...m.readings, newReading() ] });
+      const removeReading = (id) => set({ readings: m.readings.length > 1 ? m.readings.filter(rd => rd.id !== id) : m.readings });
+
+      return (
+        <div className="module">
+          <div className="module-head">
+            <input className="mname" value={m.name} placeholder={label}
+                   onChange={e => set({ name:e.target.value })} aria-label={'Name for ' + label} />
+            <span className="mtotal">Module total&nbsp;<b>{r2(calc.total)}</b>&nbsp;hrs
+              {canRemove && <>&nbsp;&nbsp;<button className="tiny no-print" onClick={onRemove}>Remove</button></>}
+            </span>
+          </div>
+
+          <div className="module-body">
+            {/* LIVE MEETING — Tier 2: split by meeting type so clinical/lab report distinctly */}
+            <Section title="Live Meeting" subtotal={calc.live}>
+              <div className="grid">
+                <Field label="Lecture (hrs)" tip="Synchronous lecture / class time, in hours.">
+                  <CalcInput value={m.lectureHrs} onCommit={v => set({ lectureHrs:v })} ariaLabel="Lecture hours" />
+                </Field>
+                <Field label="Clinical (hrs)" tip="Supervised clinical hours. Tracked separately so they can be reported on their own.">
+                  <CalcInput value={m.clinicalHrs} onCommit={v => set({ clinicalHrs:v })} ariaLabel="Clinical hours" />
+                </Field>
+                <Field label="Lab (hrs)" tip="Scheduled lab hours. Tracked separately for reporting.">
+                  <CalcInput value={m.labHrs} onCommit={v => set({ labHrs:v })} ariaLabel="Lab hours" />
+                </Field>
+              </div>
+            </Section>
+
+            {/* INSTRUCTIONAL MATERIALS */}
+            <Section title="Instructional Materials" subtotal={calc.instr}>
+              <div className="row-list">
+                {m.readings.map((rd, ri) => (
+                  <div className="reading-row" key={rd.id}>
+                    <Field label={'Reading ' + (ri + 1) + ' — pages'} tip="Number of pages assigned for this reading.">
+                      <CalcInput value={rd.pages} onCommit={v => setReading(rd.id, { pages:v })} ariaLabel="Reading pages" />
+                    </Field>
+                    <Field label="Words / page" tip="Words per page. Default 500 for a typical academic page; lower for dense figures or wide margins.">
+                      <CalcInput value={rd.wpp} onCommit={v => setReading(rd.id, { wpp:v })} placeholder="500" ariaLabel="Words per page" />
+                    </Field>
+                    <Field label="Difficulty" tip="Sets reading speed: Light 300 wpm, Moderate 250 wpm, Complex/technical 150 wpm.">
+                      <select value={rd.diff} onChange={e => setReading(rd.id, { diff:e.target.value })}>
+                        <option value="light">Light (300 wpm)</option>
+                        <option value="moderate">Moderate (250 wpm)</option>
+                        <option value="complex">Complex (150 wpm)</option>
+                      </select>
+                    </Field>
+                    <button className="tiny no-print" onClick={() => removeReading(rd.id)}
+                            disabled={m.readings.length === 1} title="Remove this reading">✕</button>
+                  </div>
+                ))}
+              </div>
+              <button className="btn ghost add-row no-print" onClick={addReading}>+ Add reading</button>
+
+              <div className="grid" style={{marginTop:'14px'}}>
+                <Field label="Lecture video (min)" tip="Runtime in minutes. Estimated at 2× runtime to account for pausing, note-taking and re-watching.">
+                  <CalcInput value={m.videoMin} onCommit={v => set({ videoMin:v })} ariaLabel="Lecture video minutes" />
+                </Field>
+                <Field label="Lecture slides (count)" tip="Number of slides. Estimated at 1.5 minutes per slide.">
+                  <CalcInput value={m.slides} onCommit={v => set({ slides:v })} ariaLabel="Slide count" />
+                </Field>
+                <Field label="Interactive units (ILO)" tip="Count of interactive learning objects (simulations, H5P, branching activities, etc.).">
+                  <CalcInput value={m.iloUnits} onCommit={v => set({ iloUnits:v })} ariaLabel="ILO units" />
+                </Field>
+                <Field label="ILO complexity" tip="Minutes per interactive unit — Low 1 min, Medium 3 min, High 7 min. Choose based on how involved each object is.">
+                  <select value={m.iloLevel} onChange={e => set({ iloLevel:e.target.value })}>
+                    <option value="low">Low (1 min/unit)</option>
+                    <option value="medium">Medium (3 min/unit)</option>
+                    <option value="high">High (7 min/unit)</option>
+                  </select>
+                </Field>
+                <Field label="Audiovisual (min)" tip="Podcasts, films, other AV. Estimated at 2× runtime for reflection and note-taking.">
+                  <CalcInput value={m.avMin} onCommit={v => set({ avMin:v })} ariaLabel="Audiovisual minutes" />
+                </Field>
+              </div>
+            </Section>
+
+            {/* ASSIGNMENTS */}
+            <Section title="Assignments" subtotal={calc.assign}>
+              <div className="grid">
+                <Field label="Discussion posts (initial)" tip="Initial discussion posts. Estimated at 1 hour each.">
+                  <CalcInput value={m.discInit} onCommit={v => set({ discInit:v })} ariaLabel="Initial discussion posts" />
+                </Field>
+                <Field label="Discussion replies" tip="Reply posts. Estimated at 0.25 hour each.">
+                  <CalcInput value={m.discReply} onCommit={v => set({ discReply:v })} ariaLabel="Discussion replies" />
+                </Field>
+                <Field label="Writing (pages)" tip="Pages of writing. Time per page depends on the writing type and drafting level below.">
+                  <CalcInput value={m.writePages} onCommit={v => set({ writePages:v })} ariaLabel="Writing pages" />
+                </Field>
+                <Field label="Writing type" tip="Reflection/informal, essay/argumentative, or research/technical — each has a different hours-per-page rate.">
+                  <select value={m.writeType} onChange={e => set({ writeType:e.target.value })}>
+                    <option value="reflection">Reflection / informal</option>
+                    <option value="essay">Essay / argumentative</option>
+                    <option value="research">Research / technical</option>
+                  </select>
+                </Field>
+                <Field label="Drafting level" tip="Single draft, draft + revision, or multiple drafts. More drafting multiplies the per-page time.">
+                  <select value={m.writeDraft} onChange={e => set({ writeDraft:e.target.value })}>
+                    <option value="single">Single draft</option>
+                    <option value="revised">Draft + revision</option>
+                    <option value="multiple">Multiple drafts</option>
+                  </select>
+                </Field>
+                <Field label="Projects (count)" tip="Number of projects of this kind in the module.">
+                  <CalcInput value={m.projCount} onCommit={v => set({ projCount:v })} ariaLabel="Project count" />
+                </Field>
+                <Field label="Hours / project" tip="Base hours you expect one project to take before complexity weighting.">
+                  <CalcInput value={m.projHrs} onCommit={v => set({ projHrs:v })} ariaLabel="Hours per project" />
+                </Field>
+                <Field label="Project complexity" tip="Complexity multiplier — Low 1×, Medium 1.5×, High 2×.">
+                  <select value={m.projCplx} onChange={e => set({ projCplx:e.target.value })}>
+                    <option value="low">Low (1×)</option>
+                    <option value="medium">Medium (1.5×)</option>
+                    <option value="high">High (2×)</option>
+                  </select>
+                </Field>
+              </div>
+            </Section>
+
+            {/* ASSESSMENTS — Tier 2: split into its own category */}
+            <Section title="Assessments" subtotal={calc.assess}>
+              <div className="grid">
+                <Field label="Quiz questions" tip="Total quiz questions. Estimated at 1.5 minutes per question.">
+                  <CalcInput value={m.quizQ} onCommit={v => set({ quizQ:v })} ariaLabel="Quiz questions" />
+                </Field>
+                <Field label="Exam questions" tip="Total exam questions. Estimated at 1.5 minutes per question.">
+                  <CalcInput value={m.examQ} onCommit={v => set({ examQ:v })} ariaLabel="Exam questions" />
+                </Field>
+              </div>
+            </Section>
+
+            {/* STUDY */}
+            <Section title="Study Time" subtotal={calc.study}>
+              <div className="grid">
+                <Field label="Study hours" tip="Independent study / review. Weighted at 1.25× to reflect varied efficiency.">
+                  <CalcInput value={m.studyHrs} onCommit={v => set({ studyHrs:v })} ariaLabel="Study hours" />
+                </Field>
+              </div>
+            </Section>
+
+            {/* ADJUSTMENTS */}
+            <Section title="Adjustments" subtotal={calc.adjust}>
+              <p className="hint">If your course includes an activity type not listed here, use the Adjustments row to account for that time and add a note.</p>
+              <div className="grid">
+                <Field label="Adjustment (hrs)" tip="Direct hours added or subtracted for anything the categories above don't capture. Use a negative value to subtract.">
+                  <CalcInput value={m.adjustHrs} onCommit={v => set({ adjustHrs:v })} min={-9999} ariaLabel="Adjustment hours" />
+                </Field>
+                <Field label="Adjustment notes">
+                  <textarea value={m.adjustNote} onChange={e => set({ adjustNote:e.target.value })}
+                            placeholder="What this adjustment covers…" />
+                </Field>
+              </div>
+            </Section>
+          </div>
+        </div>
+      );
+    }
+
+    /* ---- breakdown table (also used for print) ---- */
+    function BreakdownTable({ modules, includeOrientation, totals, grand, target, variancePct }){
+      return (
+        <table className="breakdown">
+          <thead>
+            <tr>
+              <th>Module</th>
+              {CATS.map(c => <th key={c.key}>{c.label}</th>)}
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {modules.map((m,i) => {
+              const c = calcModule(m);
+              return (
+                <tr key={m.id}>
+                  <td>{m.name || moduleLabel(i, includeOrientation)}</td>
+                  {CATS.map(cat => <td key={cat.key}>{r2(c[cat.key])}</td>)}
+                  <td><b>{r2(c.total)}</b></td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td>Semester total</td>
+              {CATS.map(c => <td key={c.key}>{r2(totals[c.key])}</td>)}
+              <td>{r2(grand)}</td>
+            </tr>
+            <tr>
+              <td>Target ({target ? (target / HRS_PER_CREDIT) : 0} cr × {HRS_PER_CREDIT})</td>
+              <td colSpan={CATS.length}></td>
+              <td>{r2(target)}</td>
+            </tr>
+            <tr>
+              <td>Variance</td>
+              <td colSpan={CATS.length}></td>
+              <td>{target ? (variancePct >= 0 ? '+' : '') + r2(variancePct) + '%' : '—'}</td>
+            </tr>
+          </tfoot>
+        </table>
+      );
+    }
+
+    /* ============================ app ============================ */
+    function App(){
+      const [courseName, setCourseName]     = useState('');
+      const [credits, setCredits]           = useState(3);
+      const [weeks, setWeeks]               = useState(15);
+      const [includeOrientation, setIncl]   = useState(true);
+      const [view, setView]                 = useState('week'); // 'week' | 'semester'
+      const [modules, setModules]           = useState(() => [ newModule(), newModule(), newModule() ]);
+
+      const calcs   = useMemo(() => modules.map(calcModule), [modules]);
+      const totals  = useMemo(() => {
+        const t = { live:0, instr:0, assign:0, assess:0, study:0, adjust:0 };
+        calcs.forEach(c => CATS.forEach(cat => { t[cat.key] += c[cat.key]; }));
+        return t;
+      }, [calcs]);
+      const grand   = useMemo(() => CATS.reduce((s,c) => s + totals[c.key], 0), [totals]);
+      const target  = num(credits) * HRS_PER_CREDIT;
+      const variancePct = target ? ((grand - target) / target) * 100 : 0;
+      const status  = varianceStatus(variancePct);
+
+      const updateModule = (id, next) => setModules(ms => ms.map(m => m.id === id ? next : m));
+      const addModule    = () => setModules(ms => [ ...ms, newModule() ]);
+      const removeModule = (id) => setModules(ms => ms.length > 1 ? ms.filter(m => m.id !== id) : ms);
+
+      const fileBase = () => {
+        const nm = (courseName || 'Course').trim().replace(/[\\/:*?"<>|]+/g, '').slice(0, 60);
+        return 'Learning Time Analysis - ' + nm;
+      };
+
+      // PDF via print — Tier 2: print layout renders BOTH views + full table regardless of on-screen toggle.
+      const doPrint = () => {
+        const prev = document.title;
+        document.title = fileBase();
+        window.print();
+        setTimeout(() => { document.title = prev; }, 500);
+      };
+
+      // Excel export (roadmap item, self-contained via SheetJS).
+      const doExcel = () => {
+        const wb = XLSX.utils.book_new();
+        const summary = [
+          ['Learning Time Analysis'],
+          ['Course', courseName || ''],
+          ['Credits', num(credits)],
+          ['Term length (weeks)', num(weeks)],
+          ['Orientation module', includeOrientation ? 'Yes (Module 0)' : 'No'],
+          [],
+          ['Category', 'Hours'],
+          ...CATS.map(c => [c.label, r2(totals[c.key])]),
+          ['Semester total', r2(grand)],
+          [],
+          ['Target (credits × 45)', r2(target)],
+          ['Variance', target ? r2(variancePct) + '%' : 'n/a'],
+        ];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), 'Summary');
+
+        const head = ['Module', ...CATS.map(c => c.label), 'Total', 'Adjustment notes'];
+        const rows = modules.map((m, i) => {
+          const c = calcModule(m);
+          return [ m.name || moduleLabel(i, includeOrientation),
+                   ...CATS.map(cat => r2(c[cat.key])), r2(c.total), m.adjustNote || '' ];
+        });
+        rows.push(['Semester total', ...CATS.map(c => r2(totals[c.key])), r2(grand), '']);
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([head, ...rows]), 'Modules');
+
+        XLSX.writeFile(wb, fileBase() + '.xlsx');
+      };
+
+      return (
+        <>
+          {/* sticky running-total bar */}
+          <div className="sticky no-print">
+            <div className="sticky-inner">
+              <span className="name">{courseName || 'Untitled course'}</span>
+              <div className="metric"><span className="k">Calculated</span><span className="v">{r2(grand)} hrs</span></div>
+              <div className="metric"><span className="k">Target</span><span className="v">{r2(target)} hrs</span></div>
+              <div className="metric"><span className="k">Modules</span><span className="v">{modules.length}</span></div>
+              <span className={'badge ' + status}>
+                {target ? (variancePct >= 0 ? '+' : '') + r2(variancePct) + '% vs target' : 'set credits'}
+              </span>
+            </div>
+          </div>
+
+          <div className="app">
+            <header className="masthead">
+              <h1>Learning Time Analysis Calculator</h1>
+              <p className="sub">Estimate total student learning time across modules against the 45-hours-per-credit standard.</p>
+
+              <div className="controls">
+                <div className="ctl">
+                  <label>Course name</label>
+                  <input type="text" value={courseName} placeholder="e.g. HHD 2007"
+                         onChange={e => setCourseName(e.target.value)} style={{minWidth:'220px'}} />
+                </div>
+                <div className="ctl">
+                  <label>Credits</label>
+                  <input className="num" type="text" inputMode="numeric" value={credits} style={{width:'80px'}}
+                         onChange={e => { const v = parseFloat(e.target.value); setCredits(isNaN(v) ? '' : v); }}
+                         onBlur={() => { if(credits === '' || isNaN(credits)) setCredits(0); }} />
+                </div>
+                <div className="ctl">
+                  <label>Term length</label>
+                  <select value={weeks} onChange={e => setWeeks(parseInt(e.target.value, 10))}>
+                    {[4,6,7,8,12,15].map(w => <option key={w} value={w}>{w} weeks</option>)}
+                  </select>
+                </div>
+                <div className="check">
+                  <input id="orient" type="checkbox" checked={includeOrientation}
+                         onChange={e => setIncl(e.target.checked)} />
+                  <label htmlFor="orient" style={{margin:0,textTransform:'none',letterSpacing:0,fontWeight:400}}>
+                    Include orientation (Module 0)
+                  </label>
+                </div>
+              </div>
+
+              <div className="btnrow">
+                <button className="btn primary" onClick={addModule}>+ Add module</button>
+                <button className="btn ghost" onClick={doPrint}>Save as PDF</button>
+                <button className="btn gold" onClick={doExcel}>Export Excel (.xlsx)</button>
+              </div>
+            </header>
+
+            {/* chart card */}
+            <div className="card">
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px'}}>
+                <h2>{view === 'week' ? 'Per-module breakdown' : 'Semester totals by category'}</h2>
+                <div className="toggle no-print">
+                  <button className={view === 'week' ? 'active' : ''} onClick={() => setView('week')}>Week view</button>
+                  <button className={view === 'semester' ? 'active' : ''} onClick={() => setView('semester')}>Semester view</button>
+                </div>
+              </div>
+
+              {/* Both charts stay mounted & sized. On screen the inactive one is parked off-canvas;
+                  in print, both are revealed (print-both) — Tier 2: export both views in one PDF. */}
+              <div className="chart-area print-both">
+                <div className={view === 'week' ? 'chart-wrap' : 'chart-offscreen'}>
+                  <BarChart modules={modules} includeOrientation={includeOrientation} />
+                </div>
+                <div className={view === 'semester' ? 'chart-wrap' : 'chart-offscreen'}>
+                  <DoughnutChart totals={totals} />
+                </div>
+              </div>
+              <Legend />
+            </div>
+
+            {/* module editors */}
+            {modules.map((m, i) => (
+              <ModuleEditor
+                key={m.id} m={m} index={i} includeOrientation={includeOrientation}
+                calc={calcs[i]}
+                onChange={next => updateModule(m.id, next)}
+                onRemove={() => removeModule(m.id)}
+                canRemove={modules.length > 1}
+              />
+            ))}
+
+            <div className="btnrow no-print">
+              <button className="btn primary" onClick={addModule}>+ Add module</button>
+            </div>
+
+            {/* breakdown table (screen + print) */}
+            <div className="card">
+              <h2>Full breakdown</h2>
+              <BreakdownTable modules={modules} includeOrientation={includeOrientation}
+                              totals={totals} grand={grand} target={target} variancePct={variancePct} />
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
