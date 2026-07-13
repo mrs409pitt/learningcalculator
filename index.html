@@ -28,7 +28,32 @@
 </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root"><div class="ltc-loading" style="padding:40px;font-family:system-ui;color:#6b7280;font-size:15px">Loading the calculator…</div></div>
+
+<script>
+  // Turn a blank page into a readable message so problems can be diagnosed remotely.
+  window.addEventListener('error', function (e) {
+    var root = document.getElementById('root');
+    if (!root) return;
+    var msg = (e && (e.message || (e.error && e.error.message))) || 'Unknown error';
+    var src = e && e.filename ? ('\n\nSource: ' + e.filename + (e.lineno ? ':' + e.lineno : '')) : '';
+    root.innerHTML =
+      '<div style="padding:24px;margin:20px;font-family:system-ui;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;white-space:pre-wrap">'
+      + '<strong>The calculator hit an error while loading.</strong>\n\n' + msg + src + '</div>';
+  }, true);
+  // If nothing has mounted after 8s, the likely cause is a blocked/slow CDN script.
+  window.addEventListener('load', function () {
+    setTimeout(function () {
+      var root = document.getElementById('root');
+      if (root && root.querySelector('.ltc-loading')) {
+        root.innerHTML =
+          '<div style="padding:24px;margin:20px;font-family:system-ui;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px">'
+          + 'Still loading after several seconds. This usually means a CDN script (React, Babel, or Chart.js) was blocked or failed to load. '
+          + 'Open the browser Console (F12) to see which request failed, then try a hard refresh (Cmd/Ctrl+Shift+R).</div>';
+      }
+    }, 8000);
+  });
+</script>
 
 <script type="text/babel" data-presets="react">
 const { useState, useMemo, useEffect, useRef } = React;
