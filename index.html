@@ -55,7 +55,7 @@
   });
 </script>
 
-<script type="text/babel" data-presets="react">
+<script type="text/plain" id="app-source">
 const { useState, useMemo, useEffect, useRef } = React;
 
 // ============================================================
@@ -783,6 +783,32 @@ function LearningTimeCalculator() {
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<LearningTimeCalculator />);
+</script>
+
+<script>
+  // Compile the JSX above with the CLASSIC runtime so it becomes React.createElement
+  // calls with no `import` statements. The automatic runtime (Babel's current default)
+  // emits `import ... from "react/jsx-runtime"`, which fails when the compiled code is
+  // injected as a classic script -> "Cannot use import statement outside a module".
+  (function () {
+    try {
+      var source = document.getElementById('app-source').textContent;
+      var compiled = Babel.transform(source, {
+        presets: [['react', { runtime: 'classic' }]]
+      }).code;
+      var s = document.createElement('script');
+      s.textContent = compiled;
+      document.body.appendChild(s);
+    } catch (err) {
+      var root = document.getElementById('root');
+      if (root) {
+        root.innerHTML =
+          '<div style="padding:24px;margin:20px;font-family:system-ui;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;white-space:pre-wrap">'
+          + '<strong>The calculator failed to compile.</strong>\n\n'
+          + (err && err.message ? err.message : String(err)) + '</div>';
+      }
+    }
+  })();
 </script>
 </body>
 </html>
